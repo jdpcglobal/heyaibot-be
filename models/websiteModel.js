@@ -2,7 +2,7 @@ const dynamo = require('../config/dynamoClient');
 const { v4: uuidv4 } = require('uuid');
 const { PutCommand, GetCommand, DeleteCommand, UpdateCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 
-const TABLE_NAME = process.env.DYNAMODB_TABLE;
+const TABLE_NAME = 'Websites';
 
 // CREATE
 const saveWebsite = async (data) => {
@@ -30,17 +30,43 @@ const saveWebsite = async (data) => {
   }
 };
 
-// READ ALL
-const getAllWebsites = async () => {
+// READ ALL - With API Key Filtering
+const getAllWebsites = async (apiKey = null) => {
   try {
-    const result = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
-    return { success: true, items: result.Items };
+    if (apiKey) {
+      // Use Scan with FilterExpression as temporary solution
+      const result = await dynamo.send(new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: 'apiKey = :apiKey',
+        ExpressionAttributeValues: {
+          ':apiKey': apiKey
+        }
+      }));
+      
+      return { 
+        success: true, 
+        items: result.Items || [],
+        message: result.Items && result.Items.length > 0 
+          ? 'Website found' 
+          : 'No website found with this API key'
+      };
+    } else {
+      // If no API key, get all websites
+      const result = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
+      return { 
+        success: true, 
+        items: result.Items || [],
+        message: result.Items && result.Items.length > 0 
+          ? 'All websites retrieved' 
+          : 'No websites found'
+      };
+    }
   } catch (error) {
     return { success: false, error: error.message };
   }
 };
 
-// READ ONE
+// READ ONE BY ID
 const getWebsiteById = async (id) => {
   try {
     const result = await dynamo.send(new GetCommand({ TableName: TABLE_NAME, Key: { id } }));
@@ -50,7 +76,55 @@ const getWebsiteById = async (id) => {
   }
 };
 
-// UPDATE FULL WEBSITE
+// READ ONE BY API KEY (using Scan as temporary solution)
+const getWebsiteByApiKey = async (apiKey) => {
+  try {
+    const result = await dynamo.send(new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: 'apiKey = :apiKey',
+      ExpressionAttributeValues: {
+        ':apiKey': apiKey
+      }
+    }));
+    
+    return result.Items && result.Items.length > 0 
+      ? { success: true, item: result.Items[0] } 
+      : { success: false, error: 'No website found with this API key' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+// GET WEBSITE BY API KEY ONLY (returns single item)
+const getWebsiteDataByApiKey = async (apiKey) => {
+  try {
+    const result = await dynamo.send(new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: 'apiKey = :apiKey',
+      ExpressionAttributeValues: {
+        ':apiKey': apiKey
+      }
+    }));
+    
+    if (result.Items && result.Items.length > 0) {
+      return { 
+        success: true, 
+        data: result.Items[0],
+        message: 'Website data retrieved successfully'
+      };
+    } else {
+      return { 
+        success: false, 
+        error: 'No website found with this API key',
+        data: null
+      };
+    }
+  } catch (error) {
+    return { success: false, error: error.message, data: null };
+  }
+};
+
+// UPDATE FULL WEBSITE BY ID
 const updateWebsite = async (id, data) => {
   const timestamp = new Date().toISOString();
   try {
@@ -90,7 +164,7 @@ const updateWebsite = async (id, data) => {
   }
 };
 
-// UPDATE CUSTOM DATA ONLY (customPrompt, urls, library)
+// UPDATE CUSTOM DATA ONLY BY ID
 const updateWebsiteCustomData = async (id, data) => {
   const timestamp = new Date().toISOString();
   try {
@@ -107,7 +181,7 @@ const updateWebsiteCustomData = async (id, data) => {
         ExpressionAttributeValues: {
           ':customPrompt': Array.isArray(data.customPrompt) ? data.customPrompt : [],
           ':urls': Array.isArray(data.urls) ? data.urls : [],
-          ':library': Array.isArray(data.promptList) ? data.promptList : [],
+          ':library': Array.isArray(data.library) ? data.library : [],
           ':updatedAt': timestamp,
         },
         ReturnValues: 'ALL_NEW',
@@ -119,7 +193,7 @@ const updateWebsiteCustomData = async (id, data) => {
   }
 };
 
-// UPDATE STATUS ONLY
+// UPDATE STATUS ONLY BY ID
 const updateWebsiteStatus = async (id, status) => {
   const timestamp = new Date().toISOString();
   try {
@@ -139,7 +213,7 @@ const updateWebsiteStatus = async (id, status) => {
   }
 };
 
-// DELETE
+// DELETE BY ID
 const deleteWebsite = async (id) => {
   try {
     await dynamo.send(new DeleteCommand({ TableName: TABLE_NAME, Key: { id } }));
@@ -153,6 +227,8 @@ module.exports = {
   saveWebsite,
   getAllWebsites,
   getWebsiteById,
+  getWebsiteByApiKey,
+  getWebsiteDataByApiKey,
   updateWebsite,
   updateWebsiteCustomData,
   updateWebsiteStatus,

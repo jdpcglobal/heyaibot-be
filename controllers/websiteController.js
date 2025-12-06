@@ -1,3 +1,4 @@
+// controllers/websiteController.js
 const websiteModel = require('../models/websiteModel');
 
 // CREATE
@@ -8,32 +9,57 @@ exports.createWebsite = async (req, res) => {
 
 // READ ALL
 exports.getWebsites = async (req, res) => {
-  const result = await websiteModel.getAllWebsites();
-  res.status(result.success ? 200 : 400).json(result);
+  // Check if API key is provided for single website lookup
+  const apiKey = req.query.apiKey || req.headers['x-api-key'];
+  
+  if (apiKey) {
+    // If API key provided, return specific website
+    const result = await websiteModel.getWebsiteByApiKey(apiKey);
+    res.status(result.success ? 200 : 404).json(result);
+  } else {
+    // Otherwise return all websites
+    const result = await websiteModel.getAllWebsites();
+    res.status(result.success ? 200 : 400).json(result);
+  }
 };
 
-// READ ONE
-exports.getWebsite = async (req, res) => {
+// READ ONE BY ID
+exports.getWebsiteById = async (req, res) => {
   const { id } = req.params;
   const result = await websiteModel.getWebsiteById(id);
   res.status(result.success ? 200 : 404).json(result);
 };
 
-// UPDATE FULL WEBSITE
+// READ ONE BY API KEY
+exports.getWebsiteByApiKey = async (req, res) => {
+  const apiKey = req.query.apiKey || req.headers['x-api-key'];
+  
+  if (!apiKey) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Missing apiKey' 
+    });
+  }
+
+  const result = await websiteModel.getWebsiteByApiKey(apiKey);
+  res.status(result.success ? 200 : 404).json(result);
+};
+
+// UPDATE FULL WEBSITE BY ID
 exports.updateWebsite = async (req, res) => {
   const { id } = req.params;
   const result = await websiteModel.updateWebsite(id, req.body);
   res.status(result.success ? 200 : 400).json(result);
 };
 
-// UPDATE CUSTOM DATA ONLY
+// UPDATE CUSTOM DATA ONLY BY ID
 exports.updateWebsiteCustomData = async (req, res) => {
   const { id } = req.params;
   const result = await websiteModel.updateWebsiteCustomData(id, req.body);
   res.status(result.success ? 200 : 400).json(result);
 };
 
-// UPDATE STATUS ONLY
+// UPDATE STATUS ONLY BY ID
 exports.updateWebsiteStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -48,7 +74,7 @@ exports.updateWebsiteStatus = async (req, res) => {
   );
 };
 
-// DELETE
+// DELETE BY ID
 exports.deleteWebsite = async (req, res) => {
   const { id } = req.params;
   const result = await websiteModel.deleteWebsite(id);
@@ -58,11 +84,13 @@ exports.deleteWebsite = async (req, res) => {
 // SYNC FROM EXTERNAL API
 exports.syncWebsites = async (req, res) => {
   const { apiBaseUrl, backendApiKey } = req.body;
-  if (!apiBaseUrl || !backendApiKey)
+  
+  if (!apiBaseUrl || !backendApiKey) {
     return res.status(400).json({
       success: false,
       error: 'Missing apiBaseUrl or backendApiKey'
     });
+  }
 
   try {
     const response = await fetch(`${apiBaseUrl}/api/websites`, {
@@ -72,11 +100,13 @@ exports.syncWebsites = async (req, res) => {
     if (!response.ok) throw new Error('Failed to fetch websites');
 
     const data = await response.json();
-    if (!data.items || data.items.length === 0)
+    
+    if (!data.items || data.items.length === 0) {
       return res.status(404).json({
         success: false,
         error: 'No websites found'
       });
+    }
 
     const savedItems = [];
     for (const item of data.items) {
@@ -85,6 +115,7 @@ exports.syncWebsites = async (req, res) => {
     }
 
     const allWebsites = await websiteModel.getAllWebsites();
+    
     res.json({
       success: true,
       message: `Fetched and synced ${savedItems.length} websites`,
@@ -92,7 +123,7 @@ exports.syncWebsites = async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
+    console.error('Sync error:', error);
     res.status(500).json({
       success: false,
       error: error.message

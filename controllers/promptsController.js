@@ -5,7 +5,7 @@ exports.healthCheck = (req, res) => {
   res.status(200).json({ message: "ChildPrompt API is running ✅" });
 };
 
-// ✅ Save or update prompt
+// ✅ Save or update prompt with API keys array
 exports.savePromptSet = async (req, res) => {
   try {
     const result = await model.saveOrUpdatePromptSet(req.body);
@@ -27,6 +27,69 @@ exports.getPromptSet = async (req, res) => {
   }
 };
 
+// ✅ Validate API key
+exports.validateApiKey = async (req, res) => {
+  try {
+    const { websiteId, promptName, apiKey } = req.params;
+    const result = await model.validateApiKey(websiteId, promptName, apiKey);
+    
+    if (!result.valid) {
+      return res.status(401).json({ error: result.message });
+    }
+    
+    res.json({ valid: true, data: result.data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Add API key to array
+exports.addApiKey = async (req, res) => {
+  try {
+    const { websiteId, promptName } = req.params;
+    const { apiKey } = req.body;
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: "apiKey is required" });
+    }
+    
+    const result = await model.addApiKey(websiteId, promptName, apiKey);
+    res.json({ message: "API key added successfully", data: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Remove API key from array
+exports.removeApiKey = async (req, res) => {
+  try {
+    const { websiteId, promptName } = req.params;
+    const { apiKey } = req.body;
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: "apiKey is required" });
+    }
+    
+    const result = await model.removeApiKey(websiteId, promptName, apiKey);
+    res.json({ message: "API key removed successfully", data: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Update entire API keys array
+exports.updateApiKeys = async (req, res) => {
+  try {
+    const { websiteId, promptName } = req.params;
+    const { apiKeys } = req.body;
+    
+    const result = await model.updateApiKeys(websiteId, promptName, apiKeys);
+    res.json({ message: "API keys updated successfully", data: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ✅ List all prompt sets for a website
 exports.listPromptSets = async (req, res) => {
   try {
@@ -38,7 +101,7 @@ exports.listPromptSets = async (req, res) => {
   }
 };
 
-// ✅ Update other fields
+// ✅ Update prompt details
 exports.updatePromptSet = async (req, res) => {
   try {
     const { websiteId, promptName } = req.params;
@@ -49,7 +112,7 @@ exports.updatePromptSet = async (req, res) => {
   }
 };
 
-// ✅ Update ONLY the promptName
+// ✅ Update prompt name
 exports.updatePromptName = async (req, res) => {
   try {
     const { websiteId, oldPromptName } = req.params;
