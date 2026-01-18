@@ -130,6 +130,7 @@ exports.syncWebsites = async (req, res) => {
     });
   }
 };
+
 exports.getWebsitesHeader = async (req, res) => {
   const apiKey = req.query.apiKey || req.headers['x-api-key'];
 
@@ -150,10 +151,12 @@ exports.getWebsitesHeader = async (req, res) => {
     success: true,
     item: {
       websiteName: result.item.websiteName,
-      status: result.item.status
+      status: result.item.status,
+      websiteUrl: result.item.websiteUrl
     }
   });
 };
+
 exports.getChatConfig = async (req, res) => {
   const apiKey = req.query.apiKey || req.headers['x-api-key'];
 
@@ -176,36 +179,13 @@ exports.getChatConfig = async (req, res) => {
       systemPrompt: result.item.systemPrompt,
       customPrompt: result.item.customPrompt,
       category: result.item.category,
-      urls: result.item.urls,
-      library: result.item.library
+      aifuture: result.item.aifuture
+     
     }
   });
 };
-exports.getWelcomeMessages = async (req, res) => {
-  const { websiteId } = req.query;
 
-  if (!websiteId) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing websiteId'
-    });
-  }
-
-  const result = await welcomeMessageModel.getByWebsiteId(websiteId);
-
-  if (!result.success) {
-    return res.status(404).json(result);
-  }
-
-  return res.json({
-    success: true,
-    items: result.items.map(item => ({
-      message: item.message
-    }))
-  });
-};
 // controllers/website.controller.js
-
 exports.getClientWebsiteConfig = async (req, res) => {
   const apiKey = req.query.apiKey || req.headers['x-api-key'];
 
@@ -237,7 +217,8 @@ exports.getClientWebsiteConfig = async (req, res) => {
         status: website.status,
         systemPrompt: website.systemPrompt || [],
         customPrompt: website.customPrompt || [],
-        category: website.category || []
+        category: website.category || [],
+         aifuture:website. aifuture || []
       }
     });
   } catch (error) {
@@ -247,4 +228,131 @@ exports.getClientWebsiteConfig = async (req, res) => {
       error: 'Server error'
     });
   }
+};
+
+// ================= AIFUTURE CRUD OPERATIONS =================
+
+// UPDATE AIFUTURE ONLY BY ID
+exports.updateWebsiteAifuture = async (req, res) => {
+  const { id } = req.params;
+  const { aifuture } = req.body;
+  
+  if (aifuture === undefined) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing aifuture data'
+    });
+  }
+
+  const result = await websiteModel.updateWebsiteAifuture(id, aifuture);
+  res.status(result.success ? 200 : 400).json(result);
+};
+
+// ADD SINGLE ITEM TO AIFUTURE
+exports.addToAifuture = async (req, res) => {
+  const { id } = req.params;
+  const item = req.body;
+  
+  if (!item || (!item.title && !item.value)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing aifuture item data'
+    });
+  }
+
+  const result = await websiteModel.addToAifuture(id, item);
+  res.status(result.success ? 200 : 400).json(result);
+};
+
+// UPDATE SPECIFIC AIFUTURE ITEM BY TITLE
+exports.updateAifutureItemByTitle = async (req, res) => {
+  const { id, title } = req.params;
+  const { value } = req.body;
+  
+  if (value === undefined) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing value for update'
+    });
+  }
+
+  const result = await websiteModel.updateAifutureItemByTitle(id, title, value);
+  res.status(result.success ? 200 : 404).json(result);
+};
+
+// DELETE SPECIFIC AIFUTURE ITEM BY TITLE
+exports.deleteAifutureItemByTitle = async (req, res) => {
+  const { id, title } = req.params;
+  
+  if (!title) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing title parameter'
+    });
+  }
+
+  const result = await websiteModel.deleteAifutureItemByTitle(id, title);
+  res.status(result.success ? 200 : 404).json(result);
+};
+
+// DELETE VALUE FROM SPECIFIC AIFUTURE ITEM
+exports.deleteValueFromAifutureItem = async (req, res) => {
+  const { id, title, value } = req.params;
+  
+  if (!title || !value) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing title or value parameter'
+    });
+  }
+
+  const result = await websiteModel.deleteValueFromAifutureItem(id, title, value);
+  res.status(result.success ? 200 : 404).json(result);
+};
+
+// CLEAR ALL AIFUTURE DATA
+exports.clearAifuture = async (req, res) => {
+  const { id } = req.params;
+  
+  const result = await websiteModel.clearAifuture(id);
+  res.status(result.success ? 200 : 400).json(result);
+};
+
+// GET AIFUTURE ITEM BY TITLE
+exports.getAifutureItemByTitle = async (req, res) => {
+  const { id, title } = req.params;
+  
+  if (!title) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing title parameter'
+    });
+  }
+
+  const result = await websiteModel.getAifutureItemByTitle(id, title);
+  res.status(result.success ? 200 : 404).json(result);
+};
+
+// GET ALL AIFUTURE TITLES
+exports.getAllAifutureTitles = async (req, res) => {
+  const { id } = req.params;
+  
+  const result = await websiteModel.getAllAifutureTitles(id);
+  res.status(result.success ? 200 : 404).json(result);
+};
+
+// GET COMPLETE AIFUTURE DATA
+exports.getWebsiteAifuture = async (req, res) => {
+  const { id } = req.params;
+  
+  const result = await websiteModel.getWebsiteById(id);
+  
+  if (!result.success) {
+    return res.status(404).json(result);
+  }
+
+  res.status(200).json({
+    success: true,
+    aifuture: result.item.aifuture || []
+  });
 };

@@ -1,0 +1,177 @@
+const express = require('express');
+const router = express.Router();
+const axios = require('axios');
+require('dotenv').config();
+
+const GEMINI_API_URL =
+  process.env.GEMINI_API_URL ||
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+/* ======================
+   BUSINESS DATA
+====================== */
+
+const categories = ["Support", "Pricing", "Features", "Integrations"];
+
+const services = [
+  {
+    name: "Website Development",
+    description: "Custom, fast, and responsive websites for businesses and startups."
+  },
+  {
+    name: "SaaS Development",
+    description: "End-to-end SaaS product development including admin panels, APIs, and scalable architecture."
+  },
+  {
+    name: "Mobile App Development",
+    description: "Android and iOS mobile app development for business and consumer use cases."
+  },
+  {
+    name: "SEO (Search Engine Optimization)",
+    description: "Improve website visibility and rankings on search engines like Google."
+  },
+  {
+    name: "SMO (Social Media Optimization)",
+    description: "Optimize social media presence to increase brand awareness and engagement."
+  },
+  {
+    name: "WordPress Development",
+    description: "WordPress website design, customization, and plugin development."
+  },
+  {
+    name: "AI Chatbot Development",
+    description: "Custom AI chatbots for websites, apps, and customer support automation.",
+    pricing: "Starts from $99/month"
+  },
+  {
+    name: "Slot & Casino Development",
+    description: "Online slot and live casino solutions with multi-level user management and API integrations."
+  }
+];
+
+const products = [
+  {
+    name: "HeyAIBot Starter",
+    description: "Basic AI chatbot for small businesses.",
+    features: ["FAQ handling", "Lead capture", "Website embed"]
+  },
+  {
+    name: "HeyAIBot Pro",
+    description: "Advanced AI chatbot with CRM, API integrations, and automation features."
+  }
+];
+
+/* ======================
+   API ROUTE
+====================== */
+
+router.post('/generate-ai-response', async (req, res) => {
+  try {
+    const { question, websiteTitle } = req.body;
+
+    if (!question || !question.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Please ask a valid question"
+      });
+    }
+
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: "AI service unavailable"
+      });
+    }
+
+    /* ======================
+       SYSTEM PROMPT
+    ====================== */
+
+    const systemPrompt = `
+You are an AI support assistant for ${websiteTitle || 'HeyAIBot'}.
+
+You are ONLY allowed to answer questions using the information provided below.
+
+BUSINESS CATEGORIES:
+${categories.join(', ')}
+
+SERVICES:
+${services
+  .map(
+    s =>
+      `- ${s.name}: ${s.description}${s.pricing ? ` (${s.pricing})` : ''}`
+  )
+  .join('\n')}
+
+PRODUCTS:
+${products
+  .map(
+    p =>
+      `- ${p.name}: ${p.description}. Features: ${
+        p.features?.length ? p.features.join(', ') : 'N/A'
+      }`
+  )
+  .join('\n')}
+
+RULES:
+- Answer ONLY if the question is related to categories, services, or products listed above.
+- If user asks about pricing, features, or comparison, respond using relevant service or product.
+- Do NOT invent information.
+- If unrelated, reply:
+  "I can help only with questions about our services, products, or support."
+
+STYLE:
+- Keep answers short, clear, and professional
+- Friendly but factual
+- No emojis
+
+USER QUESTION:
+${question}
+`;
+
+    /* ======================
+       GEMINI API CALL
+    ====================== */
+
+    const geminiResponse = await axios.post(
+      `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+      {
+        contents: [
+          {
+            parts: [{ text: systemPrompt }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 200,
+          topP: 0.8
+        }
+      },
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 8000
+      }
+    );
+
+    const aiText =
+      geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "I can help only with questions about our services or products.";
+
+    res.json({
+      success: true,
+      response: aiText.trim()
+    });
+
+  } catch (error) {
+    console.error("AI Error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Something went wrong. Please try again."
+    });
+  }
+});
+
+module.exports = router;
