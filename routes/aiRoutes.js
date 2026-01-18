@@ -43,9 +43,9 @@ const getPersonalityConfig = (personality = {}) => {
   const defaultPersonality = {
     tone: 'friendly',
     emojiLevel: 'moderate',
-    detailLevel: 'balanced',
-    useMarkdown: true,
-    includeExamples: true,
+    detailLevel: 'minimal',
+    useMarkdown: false,
+    includeExamples: false,
     beEnthusiastic: true
   };
 
