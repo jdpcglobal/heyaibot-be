@@ -61,12 +61,12 @@ const chatController = {
         status
       });
 
-      console.log('✅ Chat request created successfully:', chatRequest.id);
+     
 
       res.status(201).json({
         success: true,
         message: 'Chat request created successfully',
-        data: chatRequest
+        
       });
     } catch (error) {
       console.error('❌ Create chat request error:', error);

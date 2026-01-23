@@ -3,6 +3,9 @@ const router = express.Router();
 const axios = require('axios');
 require('dotenv').config();
 
+// DynamoDB functions import
+const { getWebsiteDataByApiKey } = require('../models/websiteModel');
+
 const GEMINI_API_URL =
   process.env.GEMINI_API_URL ||
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
@@ -22,15 +25,18 @@ const formatStringArray = (title, array) => {
   return array.map(item => `- ${item}`).join('\n');
 };
 
-// Process aifuture data
+// Process aifuture data - UPDATED STRUCTURE
 const processAifutureData = (aifutureData) => {
   const data = {};
   
   if (aifutureData && Array.isArray(aifutureData)) {
     aifutureData.forEach(item => {
       if (item.title && Array.isArray(item.value)) {
-        const formattedTitle = item.title.charAt(0).toUpperCase() + item.title.slice(1);
-        data[formattedTitle] = item.value;
+        const formattedTitle = item.title.toLowerCase().trim();
+        data[formattedTitle] = {
+          originalTitle: item.title,
+          values: item.value
+        };
       }
     });
   }
@@ -38,296 +44,22 @@ const processAifutureData = (aifutureData) => {
   return data;
 };
 
-// AI Personality Config
-const getPersonalityConfig = (personality = {}) => {
-  const defaultPersonality = {
-    tone: 'friendly',
-    emojiLevel: 'moderate',
-    detailLevel: 'minimal',
-    useMarkdown: false,
-    includeExamples: false,
-    beEnthusiastic: true
-  };
-
-  return { ...defaultPersonality, ...personality };
-};
-
-// Get Emoji Set based on personality
-const getEmojiSet = (emojiLevel) => {
-  const sets = {
-    minimal: ['😊', '👍', '✨'],
-    moderate: ['🌟', '🎯', '💡', '🚀', '🤝', '💫', '🎉', '✅', '🔥', '📚'],
-    high: ['🤩', '🎊', '💖', '🌈', '⚡', '💎', '🎨', '🤗', '👏', '🏆', '💭', '🔍', '🎯', '📌', '📍']
-  };
-  return sets[emojiLevel] || sets.moderate;
-};
-
-// Format AI Response with personality
-const formatResponseWithPersonality = (response, personality) => {
-  const config = getPersonalityConfig(personality);
-  const emojis = getEmojiSet(config.emojiLevel);
-  
-  let formatted = response.trim();
-  
-  // Add friendly opening
-  const openings = [
-    `🌟 ${formatted}`,
-    `💫 ${formatted}`,
-    `✨ ${formatted}`,
-    `🎯 ${formatted}`,
-    `🚀 ${formatted}`
-  ];
-  
-  if (config.beEnthusiastic) {
-    formatted = openings[Math.floor(Math.random() * openings.length)];
-  }
-  
-  // Enhance with emojis for excitement
-  if (config.emojiLevel !== 'minimal') {
-    const excitementWords = ['excellent', 'great', 'perfect', 'awesome', 'amazing', 'fantastic', 'wonderful'];
-    excitementWords.forEach(word => {
-      if (formatted.toLowerCase().includes(word)) {
-        const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-        formatted = formatted.replace(new RegExp(word, 'gi'), `${word} ${emoji}`);
-      }
-    });
-  }
-  
-  // Format with markdown if enabled
-  if (config.useMarkdown) {
-    // Convert lists to bullet points
-    if (formatted.includes('\n-')) {
-      formatted = formatted.replace(/\n-/g, '\n•');
-    }
-    
-    // Add bold to key terms
-    const keyTerms = ['important', 'note', 'tip', 'warning', 'remember', 'key', 'essential'];
-    keyTerms.forEach(term => {
-      if (formatted.toLowerCase().includes(term)) {
-        formatted = formatted.replace(new RegExp(`(${term})`, 'gi'), '**$1**');
-      }
-    });
-  }
-  
-  return formatted;
-};
-
-// Build system prompt with personality
-const buildSystemPrompt = (websiteTitle, data, question, personality, conversationHistory = []) => {
-  const config = getPersonalityConfig(personality);
-  
-  // Check if we have any data
-  const dataKeys = Object.keys(data);
-  
-  let prompt = `You are an AI support assistant for ${websiteTitle || 'HeyAIBot'}.
-
-**PERSONALITY CONFIGURATION:**
-- Tone: ${config.tone} and helpful
-- Detail Level: ${config.detailLevel}
-- Communication Style: Use ${config.emojiLevel} emojis, be ${config.beEnthusiastic ? 'enthusiastic' : 'professional'}
-- Format: ${config.useMarkdown ? 'Use Markdown for better readability' : 'Plain text'}
-
-`;
-
-  // Add conversation history context
-  if (conversationHistory.length > 0) {
-    prompt += "**CONVERSATION HISTORY CONTEXT:**\n";
-    conversationHistory.forEach(msg => {
-      prompt += `${msg.role}: ${msg.content}\n`;
-    });
-    prompt += "\n";
-  }
-
-  if (dataKeys.length === 0) {
-    prompt += `**KNOWLEDGE BASE STATUS:** I don't have specific business information yet.
-    
-**RESPONSE GUIDELINES:**
-1. Be warm, friendly, and helpful
-2. Admit when you don't have information
-3. Offer to connect with human support if needed
-4. Keep responses concise but thorough
-5. ${config.useMarkdown ? 'Use **bold** for emphasis and • for lists' : 'Use clear formatting'}
-
-**USER QUESTION:**
-"${question}"
-
-**YOUR RESPONSE (remember your personality!):**`;
-    return prompt;
-  }
-  
-  prompt += `**KNOWLEDGE BASE INFORMATION:**\nYou MUST use ONLY this information to answer:\n\n`;
-
-  // Add all data sections
-  dataKeys.forEach(title => {
-    const value = data[title];
-    if (Array.isArray(value) && value.length > 0) {
-      prompt += `**${title.toUpperCase()}:**\n${formatStringArray(title, value)}\n\n`;
-    }
-  });
-
-  // Generate dynamic categories list
-  const categories = dataKeys.map(key => key.toLowerCase()).join(', ');
-  
-  prompt += `**RESPONSE RULES:**
-1. Answer ONLY if the question is related to ${categories} mentioned above
-2. Use the exact information provided - DO NOT invent or add information
-3. If unrelated, politely say: "${config.emojiLevel !== 'minimal' ? '🤔 ' : ''}I can only help with questions about our ${categories}"
-4. Be ${config.tone} and ${config.beEnthusiastic ? 'enthusiastic' : 'professional'}
-5. ${config.detailLevel === 'detailed' ? 'Provide thorough explanations with examples if relevant' : 'Keep answers concise but complete'}
-6. ${config.useMarkdown ? 'Format your response nicely with Markdown (bold, lists, etc.)' : 'Use clear paragraph structure'}
-7. ${config.emojiLevel !== 'minimal' ? 'Use relevant emojis to make the response engaging' : 'Focus on clear communication'}
-
-**USER QUESTION:**
-"${question}"
-
-**YOUR RESPONSE (remember to be ${config.tone} and use your personality config):**`;
-
-  return prompt;
-};
-
-// Generate rich formatted response
-const generateRichResponse = (aiText, question, data, personality) => {
-  const config = getPersonalityConfig(personality);
-  const emojis = getEmojiSet(config.emojiLevel);
-  
-  let response = aiText.trim();
-  
-  // Enhance common patterns
-  if (response.includes('?')) {
-    const questionEnhancers = [
-      'Great question!',
-      'Interesting question!',
-      'I\'d be happy to explain!',
-      'Let me break this down for you!',
-      'Perfect timing for this question!'
-    ];
-    response = `${questionEnhancers[Math.floor(Math.random() * questionEnhancers.length)]} ${response}`;
-  }
-  
-  // Add relevant emojis based on content
-  if (config.emojiLevel !== 'minimal') {
-    const contentEmojis = {
-      'help': '🤝',
-      'thank': '🙏',
-      'welcome': '😊',
-      'information': '💡',
-      'service': '⚡',
-      'support': '🛠️',
-      'product': '📦',
-      'price': '💰',
-      'contact': '📞',
-      'email': '📧',
-      'website': '🌐',
-      'time': '⏰',
-      'date': '📅',
-      'location': '📍',
-      'quality': '🏆',
-      'best': '🌟',
-      'fast': '🚀',
-      'easy': '✨',
-      'free': '🎉',
-      'discount': '🔥',
-      'guarantee': '✅',
-      'expert': '👨‍💼',
-      'team': '👥'
-    };
-    
-    Object.entries(contentEmojis).forEach(([word, emoji]) => {
-      if (response.toLowerCase().includes(word)) {
-        // Add emoji after the word occasionally
-        if (Math.random() > 0.7) {
-          response = response.replace(new RegExp(`\\b${word}\\b`, 'gi'), `$& ${emoji}`);
-        }
-      }
-    });
-  }
-  
-  // Format lists and bullet points
-  if (config.useMarkdown) {
-    // Convert numbered lists
-    response = response.replace(/(\d+\.\s)/g, '**$1**');
-    
-    // Add section breaks for longer responses
-    if (response.length > 150) {
-      const sentences = response.split('. ');
-      if (sentences.length > 3) {
-        response = sentences.join('. \n\n');
-      }
-    }
-  }
-  
-  // Add friendly closing if appropriate
-  if (!response.includes('?') && response.length > 50) {
-    const closings = [
-      '\n\nHope this helps! 😊',
-      '\n\nLet me know if you need more details! 👍',
-      '\n\nFeel free to ask more questions! 💬',
-      '\n\nIs there anything else I can help with? 🌟'
-    ];
-    
-    if (Math.random() > 0.5) {
-      response += closings[Math.floor(Math.random() * closings.length)];
-    }
-  }
-  
-  return response;
-};
-
-/* ======================
-   MAIN API ROUTE - ENHANCED
-====================== */
-
-router.post('/generate-ai-response', async (req, res) => {
+// Get AI response from Gemini
+const getAIResponse = async (prompt) => {
   try {
-    const { 
-      question, 
-      websiteTitle, 
-      aifuture,
-      personality = {},
-      conversationHistory = []
-    } = req.body;
-
-    // Validation
-    if (!question || !question.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a question 📝"
-      });
-    }
-
-    if (!GEMINI_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        message: "AI service is currently unavailable 🔧"
-      });
-    }
-
-    // Process data
-    const dynamicData = processAifutureData(aifuture);
-    
-    // Build enhanced prompt
-    const systemPrompt = buildSystemPrompt(
-      websiteTitle, 
-      dynamicData, 
-      question, 
-      personality,
-      conversationHistory
-    );
-
-    // Call Gemini API
-    const geminiResponse = await axios.post(
+    const response = await axios.post(
       `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
       {
         contents: [
           {
             parts: [{ 
-              text: systemPrompt 
+              text: prompt 
             }]
           }
         ],
         generationConfig: {
-          temperature: 0.3, // Slightly higher for more creativity
-          maxOutputTokens: 500, // More tokens for detailed responses
+          temperature: 0.3,
+          maxOutputTokens: 200,
           topP: 0.8,
           topK: 40
         },
@@ -347,301 +79,642 @@ router.post('/generate-ai-response', async (req, res) => {
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        timeout: 15000 // Increased timeout
+        timeout: 10000
       }
     );
 
-    // Extract response
-    const aiText =
-      geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      (Object.keys(dynamicData).length > 0 
-        ? `🌟 I can help with questions about our ${Object.keys(dynamicData).join(', ').toLowerCase()}. What would you like to know? 😊`
-        : "🤔 I don't have specific business information yet, but I'd be happy to help with general questions or connect you with human support! 💬");
+    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  } catch (error) {
+    console.error('Gemini API Error:', error.message);
+    return '';
+  }
+};
 
-    // Generate rich formatted response
-    const formattedResponse = generateRichResponse(
-      aiText, 
+// Clean text from emojis and special characters
+const cleanText = (text) => {
+  if (!text) return '';
+  
+  // Remove emojis and special characters, keep only letters, numbers, spaces, and basic punctuation
+  let cleaned = text.replace(/[^\w\s.,!?\-]/g, '');
+  
+  // Remove extra spaces
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  
+  return cleaned;
+};
+
+// Check if question matches any category
+const checkCategoryMatch = (question, categories) => {
+  if (!question || !categories || !Array.isArray(categories)) {
+    return false;
+  }
+  
+  const questionLower = question.toLowerCase();
+  
+  // Check each category
+  for (const category of categories) {
+    if (typeof category === 'string') {
+      const categoryLower = category.toLowerCase();
+      
+      // Direct match
+      if (questionLower.includes(categoryLower) || categoryLower.includes(questionLower)) {
+        return true;
+      }
+      
+      // Word match
+      const categoryWords = categoryLower.split(/\s+/);
+      const questionWords = questionLower.split(/\s+/);
+      
+      for (const cWord of categoryWords) {
+        if (cWord.length > 3) {
+          for (const qWord of questionWords) {
+            if (qWord.length > 3 && (cWord.includes(qWord) || qWord.includes(cWord))) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return false;
+};
+
+// OLD: Find matching value in aifuture data (पहले वाला logic)
+const findMatchingValue = (question, aifutureData) => {
+  const processedData = processAifutureData(aifutureData);
+  const questionLower = question.toLowerCase();
+  
+  let bestMatch = null;
+  let bestMatchTitle = '';
+  let highestScore = 0;
+  
+  // Search through all titles and values
+  Object.entries(processedData).forEach(([title, titleData]) => {
+    if (Array.isArray(titleData.values)) {
+      titleData.values.forEach(value => {
+        if (typeof value === 'string') {
+          const valueLower = value.toLowerCase();
+          
+          // Calculate match score
+          let score = 0;
+          
+          // Split into words
+          const questionWords = questionLower.split(/\W+/).filter(w => w.length > 2);
+          const valueWords = valueLower.split(/\W+/).filter(w => w.length > 2);
+          
+          // Check for word matches
+          questionWords.forEach(qWord => {
+            valueWords.forEach(vWord => {
+              if (qWord.includes(vWord) || vWord.includes(qWord)) {
+                score += 1;
+              }
+            });
+          });
+          
+          // Check for direct substring match
+          if (questionLower.includes(valueLower) || valueLower.includes(questionLower)) {
+            score += 3;
+          }
+          
+          // Update best match if this is better
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = value;
+            bestMatchTitle = titleData.originalTitle;
+          }
+        }
+      });
+    }
+  });
+  
+  // Only return if we have a decent match
+  if (highestScore >= 1) {
+    return {
+      value: bestMatch,
+      title: bestMatchTitle,
+      score: highestScore
+    };
+  }
+  
+  return null;
+};
+
+// NEW: Find matching title in aifuture data
+const findMatchingTitle = (question, aifutureData) => {
+  const processedData = processAifutureData(aifutureData);
+  const questionLower = question.toLowerCase().trim();
+  
+  // List of common keywords that might indicate asking for services
+  const serviceKeywords = [
+    'provide', 'offer', 'give', 'have', 'do', 'service', 'services', 
+    'work', 'product', 'products', 'what', 'which', 'list', 'tell'
+  ];
+  
+  // First, check for direct title matches
+  for (const [titleKey, titleData] of Object.entries(processedData)) {
+    const title = titleKey;
+    const originalTitle = titleData.originalTitle.toLowerCase();
+    
+    // Check if question contains the title or vice versa
+    if (questionLower.includes(title) || title.includes(questionLower)) {
+      return {
+        titleKey: titleKey,
+        originalTitle: titleData.originalTitle,
+        values: titleData.values,
+        matchType: 'direct_title_match'
+      };
+    }
+    
+    // Check if original title is in question
+    if (questionLower.includes(originalTitle) || originalTitle.includes(questionLower)) {
+      return {
+        titleKey: titleKey,
+        originalTitle: titleData.originalTitle,
+        values: titleData.values,
+        matchType: 'original_title_match'
+      };
+    }
+  }
+  
+  // Second, check for keyword-based matches
+  let bestMatch = null;
+  let highestScore = 0;
+  
+  for (const [titleKey, titleData] of Object.entries(processedData)) {
+    const title = titleKey;
+    let score = 0;
+    
+    // Split into words
+    const titleWords = title.split(/\s+/);
+    const questionWords = questionLower.split(/\s+/);
+    
+    // Check for word matches
+    titleWords.forEach(tWord => {
+      if (tWord.length > 3) {
+        questionWords.forEach(qWord => {
+          if (qWord.length > 3) {
+            if (qWord.includes(tWord) || tWord.includes(qWord)) {
+              score += 2;
+            }
+          }
+        });
+      }
+    });
+    
+    // Check if question has service keywords
+    serviceKeywords.forEach(keyword => {
+      if (questionLower.includes(keyword) && (title.includes('service') || title.includes('product'))) {
+        score += 1;
+      }
+    });
+    
+    // Update best match if score is higher
+    if (score > highestScore) {
+      highestScore = score;
+      bestMatch = {
+        titleKey: titleKey,
+        originalTitle: titleData.originalTitle,
+        values: titleData.values,
+        matchType: 'keyword_match',
+        score: score
+      };
+    }
+  }
+  
+  // Return best match if score is good enough
+  if (bestMatch && highestScore >= 1) {
+    return bestMatch;
+  }
+  
+  return null;
+};
+
+// OLD: Generate response from matched data (पहले वाला logic)
+const generateResponseFromMatch = (matchedValue, matchedTitle) => {
+  if (!matchedValue || !matchedTitle) {
+    return null;
+  }
+  
+  // Clean the matched value
+  const cleanValue = cleanText(matchedValue);
+  
+  if (!cleanValue) {
+    return null;
+  }
+  
+  // Create simple response
+  let response = `We offer ${cleanValue}`;
+  
+  // Use the title from database
+  const cleanTitle = cleanText(matchedTitle.toLowerCase());
+  response += ` ${cleanTitle} to boost your online business!`;
+  
+  // Extract first meaningful word for call to action
+  const words = cleanValue.split(' ');
+  let firstWord = words[0] || 'service';
+  
+  // Make sure first word is meaningful
+  if (firstWord.length < 3 || ['the', 'our', 'your', 'with', 'for'].includes(firstWord.toLowerCase())) {
+    firstWord = words.length > 1 ? words[1] : 'service';
+  }
+  
+  response += ` Would you like me to start the ${firstWord} process?`;
+  
+  // Final cleanup
+  response = cleanText(response);
+  
+  return response;
+};
+
+// NEW: Generate response from matched title with all values
+const generateResponseFromTitleMatch = (matchedTitle, values) => {
+  if (!matchedTitle || !values || !Array.isArray(values)) {
+    return null;
+  }
+  
+  // Format the response
+  let response = '';
+  
+  // If it's "services" or similar
+  if (matchedTitle.toLowerCase().includes('service')) {
+    response = `We provide the following ${matchedTitle}:\n\n`;
+    values.forEach(service => {
+      response += `✅ ${service}\n`;
+    });
+    response += `\nWhich ${matchedTitle.toLowerCase()} are you interested in?`;
+  } 
+  // If it's products
+  else if (matchedTitle.toLowerCase().includes('product')) {
+    response = `We offer these ${matchedTitle}:\n\n`;
+    values.forEach(product => {
+      response += `🎯 ${product}\n`;
+    });
+    response += `\nWould you like more information about any specific ${matchedTitle.toLowerCase()}?`;
+  }
+  // Generic response for other titles
+  else {
+    response = `Here are our ${matchedTitle}:\n\n`;
+    values.forEach(item => {
+      response += `• ${item}\n`;
+    });
+    response += `\nLet me know if you need details about any specific item from our ${matchedTitle.toLowerCase()}.`;
+  }
+  
+  return response;
+};
+
+// Check if question is asking for list/overview of services/products
+const isAskingForList = (question) => {
+  const questionLower = question.toLowerCase();
+  const listKeywords = [
+    'what services', 'what products', 'list', 'tell me about', 
+    'all services', 'all products', 'everything', 'overview',
+    'what do you provide', 'what do you offer', 'what do you have',
+    'types of', 'kinds of', 'variety of'
+  ];
+  
+  for (const keyword of listKeywords) {
+    if (questionLower.includes(keyword)) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
+/* ======================
+   MAIN API ROUTE - UPDATED
+====================== */
+
+router.post('/generate-ai-response', async (req, res) => {
+  try {
+    const { 
       question, 
-      dynamicData, 
-      personality
-    );
+      apiKey 
+    } = req.body;
 
+    // Validation
+    if (!question || !question.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a question"
+      });
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: "API key is required"
+      });
+    }
+
+    // Step 1: Get website data by API key
+    const websiteResult = await getWebsiteDataByApiKey(apiKey);
+    
+    if (!websiteResult.success || !websiteResult.data) {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid API key or website not found"
+      });
+    }
+
+    const websiteData = websiteResult.data;
+    const websiteTitle = websiteData.websiteName || '';
+    const categories = Array.isArray(websiteData.category) ? websiteData.category : ['General'];
+    const aifuture = websiteData.aifuture || [];
+
+    // Step 2: Check if user is asking for list of services/products
+    const askingForList = isAskingForList(question);
+    
+    // Step 3: Try different matching strategies in priority order
+    let finalResponse = '';
+    let responseType = '';
+    let matchedData = null;
+
+    if (askingForList) {
+      // User is asking for list/overview - use title match
+      const titleMatch = findMatchingTitle(question, aifuture);
+      if (titleMatch) {
+        finalResponse = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
+      
+      
+      }
+    }
+    
+    // If no response yet, try old value matching (for specific service/product queries)
+    if (!finalResponse) {
+      const valueMatch = findMatchingValue(question, aifuture);
+      if (valueMatch) {
+        finalResponse = generateResponseFromMatch(valueMatch.value, valueMatch.title);
+    
+     
+      }
+    }
+    
+    // If still no response, try title matching (for other general title queries)
+    if (!finalResponse) {
+      const titleMatch = findMatchingTitle(question, aifuture);
+      if (titleMatch) {
+        finalResponse = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
+       
+      
+      }
+    }
+
+    // Step 4: If no match found, fallback to category logic
+    if (!finalResponse) {
+      // No title match, check category
+      const isCategoryRelated = checkCategoryMatch(question, categories);
+      
+      if (isCategoryRelated && aifuture.length > 0) {
+        // Category related but no match - show available titles
+        const processedData = processAifutureData(aifuture);
+        const availableTitles = Object.values(processedData).map(item => item.originalTitle);
+        
+        if (availableTitles.length > 0) {
+          finalResponse = `I can help you with information about our ${availableTitles.join(', ')}. `;
+          finalResponse += `For example, you can ask "What ${availableTitles[0].toLowerCase()} do you provide?"`;
+          responseType = 'available_titles';
+        } else {
+          // No data available
+          finalResponse = `I can help you with ${categories.join(', ')}. Please ask about our services or products.`;
+          responseType = 'category_only';
+        }
+      } else {
+        // Not related to category
+        finalResponse = `I can only help with questions about our ${categories.join(', ')}. `;
+        finalResponse += `Please ask something related to our services or products.`;
+        responseType = 'category_mismatch';
+      }
+    }
+
+    // Ensure we have a response
+    if (!finalResponse || finalResponse.trim() === '') {
+      finalResponse = `I can help you with our services. What specific information are you looking for?`;
+      responseType = 'default';
+    }
+
+    // Step 5: Return response
     res.json({
       success: true,
-      response: formattedResponse,
-      rawResponse: aiText,
-      formattedResponse: formattedResponse,
-      hasData: Object.keys(dynamicData).length > 0,
-      dataSections: Object.keys(dynamicData),
-      personalityUsed: getPersonalityConfig(personality)
+      response: finalResponse,
+    
+      
+      
+      
     });
 
   } catch (error) {
-    console.error("AI Generation Error:", error.message);
+    console.error("API Error:", error.message);
     
-    // Friendly error messages
-    let userMessage = "😕 Oops! I'm having trouble connecting to my knowledge base right now.";
-    let debugMessage = error.message;
+    let userMessage = "Unable to process your request at the moment.";
+    let statusCode = 500;
     
-    if (error.code === 'ECONNABORTED') {
-      userMessage = "⏰ Request timeout. Please try your question again!";
+    if (error.response?.status === 404) {
+      userMessage = "API key not found.";
+      statusCode = 404;
+    } else if (error.code === 'ECONNABORTED') {
+      userMessage = "Request timeout. Please try again.";
     } else if (error.response?.status === 429) {
-      userMessage = "🌀 Too many requests. Please try again in a moment!";
-    } else if (error.response?.status === 400) {
-      userMessage = "🔧 Technical hiccup. Could you rephrase your question?";
-    } else if (error.response?.data?.error?.message) {
-      debugMessage = error.response.data.error.message;
-      userMessage = "⚠️ AI service error. Please try a different question!";
+      userMessage = "Too many requests. Please wait a moment.";
+      statusCode = 429;
     }
 
-    res.status(error.response?.status || 500).json({
+    res.status(statusCode).json({
       success: false,
       message: userMessage,
-      error: debugMessage,
-      fallbackResponse: "🌟 I'm your friendly assistant! While I'm having technical issues, feel free to ask me anything about our services, and I'll do my best to help once I'm back online! 😊"
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
 /* ======================
-   ENHANCED SUPPORTING ROUTES
+   SIMPLE DIRECT RESPONSE ENDPOINT - UPDATED
 ====================== */
 
-// GET endpoint to check available data with preview
-router.get('/available-data', (req, res) => {
-  const { aifuture } = req.query;
-  let data = {};
-  
+router.post('/direct-response', async (req, res) => {
   try {
-    if (aifuture) {
-      data = processAifutureData(JSON.parse(aifuture));
-    }
-    
-    const sections = Object.keys(data);
-    const totalItems = Object.values(data).reduce((sum, arr) => 
-      sum + (Array.isArray(arr) ? arr.length : 0), 0
-    );
-    
-    const sectionDetails = sections.map(section => ({
-      name: section,
-      items: data[section].length,
-      sampleItems: data[section].slice(0, 3)
-    }));
-    
-    res.json({
-      success: true,
-      data: data,
-      sections: sections,
-      sectionDetails: sectionDetails,
-      totalItems: totalItems,
-      hasData: sections.length > 0,
-      summary: sections.length > 0 
-        ? `📊 Knowledge base has ${sections.length} sections with ${totalItems} total items`
-        : '📭 Knowledge base is empty'
-    });
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid data format 📄"
-    });
-  }
-});
+    const { question, apiKey } = req.body;
 
-// POST endpoint to validate and preview data with examples
-router.post('/preview-prompt', async (req, res) => {
-  try {
-    const { websiteTitle, aifuture, question, personality } = req.body;
-    
-    if (!question) {
+    // Basic validation
+    if (!question || !question.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Question is required for preview ❓"
+        message: "Question is required"
       });
     }
-    
-    const dynamicData = processAifutureData(aifuture);
-    const config = getPersonalityConfig(personality);
-    const prompt = buildSystemPrompt(websiteTitle, dynamicData, question, personality);
-    
-    // Generate example response
-    let exampleResponse = "🌟 Here's how I would typically respond:\n\n";
-    
-    if (Object.keys(dynamicData).length > 0) {
-      exampleResponse += `For a question about "${question.substring(0, 50)}...", I would:\n`;
-      exampleResponse += `1. Check if it's related to ${Object.keys(dynamicData).join(', ')}\n`;
-      exampleResponse += `2. Use the specific information available\n`;
-      exampleResponse += `3. Format the response ${config.useMarkdown ? 'with Markdown' : 'clearly'}\n`;
-      exampleResponse += `4. Use a ${config.tone} tone with ${config.emojiLevel} emojis\n\n`;
-      exampleResponse += `**Example:** "✨ Great question! Based on our ${Object.keys(dynamicData)[0]} information, here's what I can tell you..."`;
-    } else {
-      exampleResponse += "Since I don't have specific business data, I would:\n";
-      exampleResponse += "1. Politely admit the limitation\n";
-      exampleResponse += "2. Offer general assistance\n";
-      exampleResponse += "3. Suggest contacting human support\n\n";
-      exampleResponse += "**Example:** \"🤔 I don't have specific information about that yet, but I'd be happy to help with general questions or connect you with our team! 💬\"";
-    }
-    
-    res.json({
-      success: true,
-      sections: Object.keys(dynamicData),
-      itemCount: Object.values(dynamicData).reduce((sum, arr) => 
-        sum + (Array.isArray(arr) ? arr.length : 0), 0
-      ),
-      hasData: Object.keys(dynamicData).length > 0,
-      personalityConfig: config,
-      promptPreview: prompt.length > 1000 
-        ? prompt.substring(0, 1000) + "...\n\n[📝 Prompt truncated for preview]" 
-        : prompt,
-      promptLength: prompt.length,
-      exampleResponse: exampleResponse,
-      estimatedTokens: Math.ceil(prompt.length / 4)
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error generating preview 🔧"
-    });
-  }
-});
 
-// Test endpoint with sample conversation
-router.post('/test-conversation', async (req, res) => {
-  try {
-    const { aifuture, personality, sampleQuestions = [] } = req.body;
-    
-    const dynamicData = processAifutureData(aifuture);
-    const config = getPersonalityConfig(personality);
-    
-    const defaultQuestions = [
-      "What services do you offer?",
-      "How can I contact support?",
-      "Tell me about your products",
-      "What are your business hours?"
-    ];
-    
-    const questions = sampleQuestions.length > 0 ? sampleQuestions : defaultQuestions;
-    
-    const testResults = [];
-    
-    for (const question of questions.slice(0, 3)) { // Test max 3 questions
-      const prompt = buildSystemPrompt("Test Website", dynamicData, question, config);
-      
-      testResults.push({
-        question: question,
-        hasRelevantData: Object.keys(dynamicData).some(section => 
-          question.toLowerCase().includes(section.toLowerCase().slice(0, 10))
-        ),
-        promptLength: prompt.length,
-        dataSectionsUsed: Object.keys(dynamicData).filter(section =>
-          prompt.toLowerCase().includes(section.toLowerCase())
-        )
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: "API key is required"
       });
     }
+
+    // Get website data
+    const websiteResult = await getWebsiteDataByApiKey(apiKey);
     
-    res.json({
-      success: true,
-      testResults: testResults,
-      summary: {
-        totalSections: Object.keys(dynamicData).length,
-        totalItems: Object.values(dynamicData).reduce((sum, arr) => 
-          sum + (Array.isArray(arr) ? arr.length : 0), 0
-        ),
-        personality: config,
-        coverage: `${testResults.filter(r => r.hasRelevantData).length}/${testResults.length} questions have relevant data`
+    if (!websiteResult.success || !websiteResult.data) {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid API key"
+      });
+    }
+
+    const websiteData = websiteResult.data;
+    const categories = Array.isArray(websiteData.category) ? websiteData.category : ['General'];
+    const aifuture = websiteData.aifuture || [];
+
+    // Check what type of question it is
+    const askingForList = isAskingForList(question);
+    
+    let response = '';
+    let matchedData = null;
+    let hasMatch = false;
+
+    if (askingForList) {
+      // Try title match first for list questions
+      const titleMatch = findMatchingTitle(question, aifuture);
+      if (titleMatch) {
+        response = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
+        matchedData = {
+          title: titleMatch.originalTitle,
+          values: titleMatch.values
+        };
+        hasMatch = true;
       }
-    });
+    } else {
+      // Try value match first for specific questions
+      const valueMatch = findMatchingValue(question, aifuture);
+      if (valueMatch) {
+        response = generateResponseFromMatch(valueMatch.value, valueMatch.title);
+        matchedData = {
+          value: valueMatch.value,
+          title: valueMatch.title
+        };
+        hasMatch = true;
+      } else {
+        // If no value match, try title match
+        const titleMatch = findMatchingTitle(question, aifuture);
+        if (titleMatch) {
+          response = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
+          matchedData = {
+            title: titleMatch.originalTitle,
+            values: titleMatch.values
+          };
+          hasMatch = true;
+        }
+      }
+    }
+
+    if (hasMatch && response) {
+      res.json({
+        success: true,
+        response: response,
+        matchedData: matchedData,
+        hasMatch: true,
+        matchType: askingForList ? 'title_match' : 'value_match'
+      });
+      return;
+    }
+
+    // No match found - show available titles
+    const processedData = processAifutureData(aifuture);
+    const availableTitles = Object.values(processedData).map(item => item.originalTitle);
     
+    response = `I can help you with information about our ${categories.join(', ')}. `;
+    
+    if (availableTitles.length > 0) {
+      response += `We have data about: ${availableTitles.join(', ')}. `;
+      response += `Try asking about any of these.`;
+    } else {
+      response += `Please ask about our services or products.`;
+    }
+    
+    res.json({
+      success: true,
+      response: response,
+      hasMatch: false,
+      availableTitles: availableTitles,
+      availableCategories: categories
+    });
+
   } catch (error) {
+    console.error("Direct Response Error:", error.message);
+    
     res.status(500).json({
       success: false,
-      message: "Test failed ⚠️"
+      message: "Unable to process your request",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
-// Health check with AI status
-router.get('/health', async (req, res) => {
-  const health = {
-    success: true,
-    message: "🤖 AI Response API is running smoothly",
-    timestamp: new Date().toISOString(),
-    hasApiKey: !!GEMINI_API_KEY,
-    apiKeyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
-    environment: process.env.NODE_ENV || 'development',
-    features: [
-      "Enhanced AI responses",
-      "Personality customization",
-      "Markdown formatting",
-      "Emoji support",
-      "Conversation history",
-      "Error handling"
-    ]
-  };
-  
-  // Test AI connectivity
-  try {
-    if (GEMINI_API_KEY) {
-      const testResponse = await axios.get(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`,
-        { timeout: 5000 }
-      );
-      health.aiStatus = "connected ✅";
-      health.availableModels = testResponse.data?.models?.length || 0;
-    } else {
-      health.aiStatus = "not configured ⚠️";
-    }
-  } catch (error) {
-    health.aiStatus = "connection failed ❌";
-    health.aiError = error.message;
-  }
-  
-  res.json(health);
-});
+/* ======================
+   HEALTH CHECK
+====================== */
 
-// Personality configuration endpoint
-router.get('/personality-options', (req, res) => {
-  const personalities = {
-    friendly: {
-      tone: 'friendly',
-      emojiLevel: 'moderate',
-      detailLevel: 'balanced',
-      description: 'Warm, helpful, with moderate emojis'
-    },
-    professional: {
-      tone: 'professional',
-      emojiLevel: 'minimal',
-      detailLevel: 'detailed',
-      description: 'Formal, detailed, minimal emojis'
-    },
-    enthusiastic: {
-      tone: 'enthusiastic',
-      emojiLevel: 'high',
-      detailLevel: 'balanced',
-      description: 'Excited, engaging, lots of emojis'
-    },
-    concise: {
-      tone: 'direct',
-      emojiLevel: 'minimal',
-      detailLevel: 'brief',
-      description: 'Short, to the point, no fluff'
-    }
-  };
-  
+router.get('/health', (req, res) => {
   res.json({
     success: true,
-    personalities: personalities,
-    emojiLevels: {
-      minimal: 'Few emojis (😊 👍 ✨)',
-      moderate: 'Regular emojis (🌟 🎯 💡 🚀)',
-      high: 'Many emojis (🤩 🎊 💖 🌈 ⚡)'
-    },
-    detailLevels: {
-      brief: 'Short answers',
-      balanced: 'Moderate detail',
-      detailed: 'Comprehensive explanations'
-    }
+    message: "AI Response API is running",
+    timestamp: new Date().toISOString(),
+    hasApiKey: !!GEMINI_API_KEY,
+    environment: process.env.NODE_ENV || 'development'
   });
+});
+
+/* ======================
+   API KEY VALIDATION
+====================== */
+
+router.post('/validate-api-key', async (req, res) => {
+  try {
+    const { apiKey } = req.body;
+
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: "API key is required"
+      });
+    }
+
+    const websiteResult = await getWebsiteDataByApiKey(apiKey);
+    
+    if (websiteResult.success && websiteResult.data) {
+      const websiteData = websiteResult.data;
+      const processedData = processAifutureData(websiteData.aifuture || []);
+      const availableTitles = Object.values(processedData).map(item => item.originalTitle);
+      
+      res.json({
+        success: true,
+        valid: true,
+        website: {
+          name: websiteData.websiteName || '',
+          url: websiteData.websiteUrl || '',
+          categories: Array.isArray(websiteData.category) ? websiteData.category : ['General'],
+          hasAifutureData: websiteData.aifuture && websiteData.aifuture.length > 0,
+          availableTitles: availableTitles
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        valid: false,
+        message: "Invalid API key"
+      });
+    }
+
+  } catch (error) {
+    console.error("API Key Validation Error:", error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: "Unable to validate API key",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
 module.exports = router;
