@@ -206,10 +206,7 @@ const findMatchingTitle = (question, aifutureData) => {
   const questionLower = question.toLowerCase().trim();
   
   // List of common keywords that might indicate asking for services
-  const serviceKeywords = [
-    'provide', 'offer', 'give', 'have', 'do', 'service', 'services', 
-    'work', 'product', 'products', 'what', 'which', 'list', 'tell'
-  ];
+  
   
   // First, check for direct title matches
   for (const [titleKey, titleData] of Object.entries(processedData)) {
@@ -263,11 +260,7 @@ const findMatchingTitle = (question, aifutureData) => {
     });
     
     // Check if question has service keywords
-    serviceKeywords.forEach(keyword => {
-      if (questionLower.includes(keyword) && (title.includes('service') || title.includes('product'))) {
-        score += 1;
-      }
-    });
+   
     
     // Update best match if score is higher
     if (score > highestScore) {
@@ -328,37 +321,38 @@ const generateResponseFromMatch = (matchedValue, matchedTitle) => {
 };
 
 // NEW: Generate response from matched title with all values
+// NEW: Generate response from matched title with all values - UPDATED FOR COMMA FORMAT
 const generateResponseFromTitleMatch = (matchedTitle, values) => {
   if (!matchedTitle || !values || !Array.isArray(values)) {
     return null;
   }
   
-  // Format the response
+  // Format values as comma-separated list
+  let formattedList = '';
+  
+  if (values.length === 1) {
+    formattedList = values[0];
+  } else if (values.length === 2) {
+    formattedList = `${values[0]} and ${values[1]}`;
+  } else {
+    // Join all but last with commas, then "and" for the last one
+    formattedList = values.slice(0, -1).join(', ') + ', ' + values[values.length - 1];
+  }
+  
+  // Format the response based on title type
   let response = '';
   
   // If it's "services" or similar
   if (matchedTitle.toLowerCase().includes('service')) {
-    response = `We provide the following ${matchedTitle}:\n\n`;
-    values.forEach(service => {
-      response += `✅ ${service}\n`;
-    });
-    response += `\nWhich ${matchedTitle.toLowerCase()} are you interested in?`;
+    response = `We provide the following ${matchedTitle}: ${formattedList}. Which ${matchedTitle.toLowerCase()} are you interested in?`;
   } 
   // If it's products
   else if (matchedTitle.toLowerCase().includes('product')) {
-    response = `We offer these ${matchedTitle}:\n\n`;
-    values.forEach(product => {
-      response += `🎯 ${product}\n`;
-    });
-    response += `\nWould you like more information about any specific ${matchedTitle.toLowerCase()}?`;
+    response = `We offer these ${matchedTitle}: ${formattedList}. Would you like more information about any specific ${matchedTitle.toLowerCase()}?`;
   }
   // Generic response for other titles
   else {
-    response = `Here are our ${matchedTitle}:\n\n`;
-    values.forEach(item => {
-      response += `• ${item}\n`;
-    });
-    response += `\nLet me know if you need details about any specific item from our ${matchedTitle.toLowerCase()}.`;
+    response = `Here are our ${matchedTitle}: ${formattedList}. Let me know if you need details about any specific item from our ${matchedTitle.toLowerCase()}.`;
   }
   
   return response;
