@@ -291,7 +291,7 @@ exports.getFilteredPromptSet = async (req, res) => {
     // Only return filtered fields
     const filteredData = {
       backendApiKey: result.backendApiKey,
-      promptList: result.promptList,
+      summaryList: result.summaryList,
       promptName: result.promptName,
       prompts: result.prompts,
       promptsWithParams: result.promptsWithParams,

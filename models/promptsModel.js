@@ -19,7 +19,7 @@ exports.saveOrUpdatePromptSet = async (data) => {
     sk: `prompt#${data.promptName}`,
     websiteId: data.websiteId,
     promptName: data.promptName,
-    promptList: data.promptList || [],
+    summaryList: data.summaryList,
     prompts: data.prompts || [],
     promptsWithParams: data.promptsWithParams || [], // CHANGED: Now it's an array of objects
     urls: data.urls || [],
@@ -304,9 +304,9 @@ exports.updatePromptSet = async (websiteId, promptName, updateData) => {
   let updateExpression = "set updatedAt = :ua";
   const expressionAttributeValues = { ":ua": now };
   
-  if (updateData.promptList !== undefined) {
-    updateExpression += ", promptList = :pl";
-    expressionAttributeValues[":pl"] = updateData.promptList;
+ if (updateData.summaryList !== undefined) {
+    updateExpression += ", summaryList = :sl";
+    expressionAttributeValues[":sl"] = updateData.summaryList;
   }
   
   if (updateData.prompts !== undefined) {
