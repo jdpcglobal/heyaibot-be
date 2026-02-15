@@ -27,6 +27,7 @@ jobs:
         run: |
           npm install
           npm run build --if-present
+          npm run test --if-present
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -50,9 +51,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_34D61D210F034535B3F0D3C3C3D6DF18 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_DD72264D810E4B08BAC31B5392422E21 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_9ECBE73CD9444CCEA3CED7D80FCCD264 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_556BBBF8378049BFBD0A8FC48B24E1FA }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_CF7EA52013884563BD3736BB96861FAC }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_A6DC98C8F9934FFB98BA568E551CCDC6 }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -61,5 +62,4 @@ jobs:
           app-name: 'heyaibot'
           slot-name: 'Production'
           package: .
-
           
