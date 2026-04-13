@@ -21,15 +21,14 @@ const chatController = {
     }
   },
 
-  // Create new chat request - UPDATED with backendApiKey
+  // Create new chat request
   createChatRequest: async (req, res) => {
     try {
       const { websiteId, collectedData, backendApiKey, status = 'pending' } = req.body;
 
       console.log('📝 Creating chat request:', { 
         websiteId, 
-        collectedData: typeof collectedData,
-        backendApiKey: backendApiKey ? '***' + backendApiKey.slice(-4) : 'missing', // Log safely
+        backendApiKey: backendApiKey ? '***' + backendApiKey.slice(-4) : 'missing',
         status 
       });
 
@@ -57,16 +56,14 @@ const chatController = {
       const chatRequest = await ChatRequest.create({
         websiteId,
         collectedData,
-        backendApiKey, // ✅ NEW FIELD
+        backendApiKey,
         status
       });
-
-     
 
       res.status(201).json({
         success: true,
         message: 'Chat request created successfully',
-        
+        data: chatRequest
       });
     } catch (error) {
       console.error('❌ Create chat request error:', error);
@@ -78,13 +75,12 @@ const chatController = {
     }
   },
 
-  // Get all chat requests (admin) - UPDATED with backendApiKey filter
+  // Get all chat requests (with optional filters) - NO LIMIT
   getAllChatRequests: async (req, res) => {
     try {
-      const { limit = 100, status, websiteId, backendApiKey } = req.query;
+      const { status, websiteId, backendApiKey } = req.query;
 
-      console.log('📋 Fetching all chat requests:', { 
-        limit, 
+      console.log('📋 Fetching all chat requests (NO LIMIT):', { 
         status, 
         websiteId, 
         backendApiKey: backendApiKey ? '***' + backendApiKey.slice(-4) : 'all' 
@@ -93,17 +89,13 @@ const chatController = {
       let chatRequests;
 
       if (backendApiKey) {
-        // ✅ NEW: Get by backendApiKey
-        chatRequests = await ChatRequest.getByBackendApiKey(backendApiKey, parseInt(limit));
+        chatRequests = await ChatRequest.getByBackendApiKey(backendApiKey);
       } else if (websiteId) {
-        // Get by website ID
-        chatRequests = await ChatRequest.getByWebsiteId(websiteId, parseInt(limit));
+        chatRequests = await ChatRequest.getByWebsiteId(websiteId);
       } else if (status) {
-        // Get by status
-        chatRequests = await ChatRequest.getByStatus(status, parseInt(limit));
+        chatRequests = await ChatRequest.getByStatus(status);
       } else {
-        // Get all
-        chatRequests = await ChatRequest.getAll(parseInt(limit));
+        chatRequests = await ChatRequest.getAll();
       }
 
       console.log(`✅ Found ${chatRequests.length} chat requests`);
@@ -119,25 +111,33 @@ const chatController = {
         success: false,
         message: 'Internal server error',
         error: error.message,
-        data: [] // Return empty array instead of failing
+        data: []
       });
     }
   },
 
-  // ✅ NEW: Get chat requests by backend API Key
+  // Get chat requests by backend API Key - NO LIMIT
   getChatRequestsByBackendApiKey: async (req, res) => {
     try {
       const { backendApiKey } = req.params;
-      const { limit = 50 } = req.query;
+      const { status } = req.query;
 
-      console.log('📋 Fetching chat requests for backend API Key:', '***' + backendApiKey.slice(-4));
+      console.log('📋 Fetching ALL chat requests for backend API Key (NO LIMIT):', '***' + backendApiKey.slice(-4));
 
-      const chatRequests = await ChatRequest.getByBackendApiKey(backendApiKey, parseInt(limit));
+      let chatRequests = await ChatRequest.getByBackendApiKey(backendApiKey);
+      
+      // Filter by status if provided
+      if (status) {
+        chatRequests = chatRequests.filter(req => req.status === status);
+      }
+
+      console.log(`✅ Returning ${chatRequests.length} records`);
 
       res.json({
         success: true,
         data: chatRequests,
-        count: chatRequests.length
+        count: chatRequests.length,
+        backendApiKey: backendApiKey
       });
     } catch (error) {
       console.error('❌ Get chat requests by backendApiKey error:', error);
@@ -149,15 +149,22 @@ const chatController = {
     }
   },
 
-  // Get chat requests by website ID
+  // Get chat requests by website ID - NO LIMIT
   getChatRequestsByWebsite: async (req, res) => {
     try {
       const { websiteId } = req.params;
-      const { limit = 50 } = req.query;
+      const { status } = req.query;
 
-      console.log('📋 Fetching chat requests for website:', websiteId);
+      console.log('📋 Fetching ALL chat requests for website (NO LIMIT):', websiteId);
 
-      const chatRequests = await ChatRequest.getByWebsiteId(websiteId, parseInt(limit));
+      let chatRequests = await ChatRequest.getByWebsiteId(websiteId);
+      
+      // Filter by status if provided
+      if (status) {
+        chatRequests = chatRequests.filter(req => req.status === status);
+      }
+
+      console.log(`✅ Returning ${chatRequests.length} records`);
 
       res.json({
         success: true,
@@ -211,6 +218,13 @@ const chatController = {
       const { status } = req.body;
 
       console.log('🔄 Updating chat request status:', { id, status });
+
+      if (!status) {
+        return res.status(400).json({
+          success: false,
+          message: 'Status is required'
+        });
+      }
 
       if (!['pending', 'confirmed', 'cancelled', 'completed'].includes(status)) {
         return res.status(400).json({
@@ -277,34 +291,64 @@ const chatController = {
     }
   },
 
-  // Get chat requests statistics - UPDATED with backendApiKey support
+  // Get count by backendApiKey
+  getCountByBackendApiKey: async (req, res) => {
+    try {
+      const { backendApiKey } = req.params;
+
+      console.log('🔢 Getting count for backend API Key:', '***' + backendApiKey.slice(-4));
+
+      if (!backendApiKey) {
+        return res.status(400).json({
+          success: false,
+          message: 'Backend API Key is required'
+        });
+      }
+
+      const count = await ChatRequest.getCountByBackendApiKey(backendApiKey);
+
+      res.json({
+        success: true,
+        count: count,
+        backendApiKey: backendApiKey
+      });
+    } catch (error) {
+      console.error('❌ Get count error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: error.message
+      });
+    }
+  },
+
+  // Get chat requests statistics
   getChatStats: async (req, res) => {
     try {
       const { websiteId, backendApiKey } = req.query;
 
-      console.log('📊 Fetching chat statistics:', { 
+      console.log('📊 Fetching chat statistics (NO LIMIT):', { 
         websiteId, 
         backendApiKey: backendApiKey ? '***' + backendApiKey.slice(-4) : 'all' 
       });
 
-      const allRequests = await ChatRequest.getAll(1000);
+      let allRequests;
       
-      // Filter data
-      let filteredRequests = allRequests;
       if (backendApiKey) {
-        filteredRequests = filteredRequests.filter(req => req.backendApiKey === backendApiKey);
-      }
-      if (websiteId) {
-        filteredRequests = filteredRequests.filter(req => req.websiteId === websiteId);
+        allRequests = await ChatRequest.getByBackendApiKey(backendApiKey);
+      } else if (websiteId) {
+        allRequests = await ChatRequest.getByWebsiteId(websiteId);
+      } else {
+        allRequests = await ChatRequest.getAll();
       }
 
       const stats = {
-        total: filteredRequests.length,
-        pending: filteredRequests.filter(req => req.status === 'pending').length,
-        confirmed: filteredRequests.filter(req => req.status === 'confirmed').length,
-        cancelled: filteredRequests.filter(req => req.status === 'cancelled').length,
-        completed: filteredRequests.filter(req => req.status === 'completed').length,
-        recent: filteredRequests.slice(0, 10)
+        total: allRequests.length,
+        pending: allRequests.filter(req => req.status === 'pending').length,
+        confirmed: allRequests.filter(req => req.status === 'confirmed').length,
+        cancelled: allRequests.filter(req => req.status === 'cancelled').length,
+        completed: allRequests.filter(req => req.status === 'completed').length,
+        recent: allRequests.slice(0, 10)
       };
 
       res.json({

@@ -17,7 +17,7 @@ class ChatRequest {
     const {
       websiteId,
       collectedData,
-      backendApiKey, // ✅ NEW FIELD
+      backendApiKey,
       status = 'pending',
       createdAt = new Date().toISOString(),
       updatedAt = new Date().toISOString()
@@ -31,7 +31,7 @@ class ChatRequest {
       type: 'chat-request',
       websiteId,
       collectedData: this.formatCollectedData(collectedData),
-      backendApiKey, // ✅ NEW FIELD
+      backendApiKey,
       status,
       createdAt,
       updatedAt
@@ -45,7 +45,15 @@ class ChatRequest {
     try {
       await dynamo.send(new PutCommand(params));
       console.log('✅ Chat request saved to DynamoDB:', id);
-      return item;
+      
+      // Return only required fields
+      return {
+        id: item.id,
+        type: item.type,
+        status: item.status,
+        createdAt: item.createdAt,
+        collectedData: item.collectedData
+      };
     } catch (error) {
       console.error('❌ DynamoDB Put Error:', error);
       throw new Error(`Error creating chat request: ${error.message}`);
@@ -69,8 +77,8 @@ class ChatRequest {
     return collectedData;
   }
 
-  // Get chat requests by website ID
-  static async getByWebsiteId(websiteId, limit = 50) {
+  // Get chat requests by website ID - NO LIMIT
+  static async getByWebsiteId(websiteId) {
     try {
       const params = {
         TableName: TABLE_NAME,
@@ -79,58 +87,90 @@ class ChatRequest {
         ExpressionAttributeValues: {
           ':websiteId': websiteId
         },
-        Limit: limit,
-        ScanIndexForward: false
+        ScanIndexForward: false // newest first
       };
 
       const result = await dynamo.send(new QueryCommand(params));
-      return result.Items || [];
+      
+      // Map to return only required fields
+      const items = (result.Items || []).map(item => ({
+        id: item.id,
+        type: item.type,
+        status: item.status,
+        createdAt: item.createdAt,
+        collectedData: item.collectedData
+      }));
+      
+      console.log(`✅ Found ${items.length} records for websiteId: ${websiteId}`);
+      return items;
     } catch (error) {
       console.error('❌ GSI Query failed, falling back to scan:', error.message);
-      return await this.getAll(limit);
+      return await this.getAll();
     }
   }
 
-  // ✅ NEW: Get chat requests by backendApiKey
-  static async getByBackendApiKey(backendApiKey, limit = 50) {
+  // Get chat requests by backendApiKey - NO LIMIT
+  static async getByBackendApiKey(backendApiKey) {
     try {
-      const params = {
-        TableName: TABLE_NAME,
-        IndexName: 'backendApiKey-index', // You'll need to create this GSI
-        KeyConditionExpression: 'backendApiKey = :backendApiKey',
-        ExpressionAttributeValues: {
-          ':backendApiKey': backendApiKey
-        },
-        Limit: limit,
-        ScanIndexForward: false
-      };
-
-      const result = await dynamo.send(new QueryCommand(params));
-      return result.Items || [];
-    } catch (error) {
-      console.error('❌ BackendApiKey GSI Query failed, falling back to scan:', error.message);
-      
-      // Fallback to scan if GSI doesn't exist
-      const scanParams = {
-        TableName: TABLE_NAME,
-        Limit: limit,
-        FilterExpression: 'backendApiKey = :backendApiKey',
-        ExpressionAttributeValues: {
-          ':backendApiKey': backendApiKey
-        }
-      };
-
+      // Try using GSI first
       try {
+        const params = {
+          TableName: TABLE_NAME,
+          IndexName: 'backendApiKey-index',
+          KeyConditionExpression: 'backendApiKey = :backendApiKey',
+          ExpressionAttributeValues: {
+            ':backendApiKey': backendApiKey
+          },
+          ScanIndexForward: false // newest first
+        };
+
+        const result = await dynamo.send(new QueryCommand(params));
+        
+        // Map to return only required fields
+        const items = (result.Items || []).map(item => ({
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          createdAt: item.createdAt,
+          collectedData: item.collectedData
+        }));
+        
+        console.log(`✅ Found ${items.length} records for backendApiKey via GSI`);
+        return items;
+        
+      } catch (gsiError) {
+        console.error('❌ BackendApiKey GSI Query failed, falling back to scan:', gsiError.message);
+        
+        // Fallback to scan - NO LIMIT
+        const scanParams = {
+          TableName: TABLE_NAME,
+          FilterExpression: 'backendApiKey = :backendApiKey',
+          ExpressionAttributeValues: {
+            ':backendApiKey': backendApiKey
+          }
+        };
+
         const scanResult = await dynamo.send(new ScanCommand(scanParams));
-        return scanResult.Items || [];
-      } catch (scanError) {
-        console.error('❌ Scan also failed:', scanError);
-        throw new Error(`Error fetching chat requests by backendApiKey: ${scanError.message}`);
+        
+        // Map to return only required fields
+        const items = (scanResult.Items || []).map(item => ({
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          createdAt: item.createdAt,
+          collectedData: item.collectedData
+        }));
+        
+        console.log(`✅ Found ${items.length} records via scan`);
+        return items;
       }
+    } catch (error) {
+      console.error('❌ Error fetching by backendApiKey:', error);
+      throw new Error(`Error fetching chat requests by backendApiKey: ${error.message}`);
     }
   }
 
-  // Get chat request by ID
+  // Get chat request by ID with only required fields
   static async getById(id) {
     const params = {
       TableName: TABLE_NAME,
@@ -139,7 +179,16 @@ class ChatRequest {
 
     try {
       const result = await dynamo.send(new GetCommand(params));
-      return result.Item || null;
+      if (!result.Item) return null;
+      
+      // Return only required fields
+      return {
+        id: result.Item.id,
+        type: result.Item.type,
+        status: result.Item.status,
+        createdAt: result.Item.createdAt,
+        collectedData: result.Item.collectedData
+      };
     } catch (error) {
       console.error('❌ DynamoDB Get Error:', error);
       throw new Error(`Error fetching chat request: ${error.message}`);
@@ -170,82 +219,81 @@ class ChatRequest {
 
     try {
       const result = await dynamo.send(new UpdateCommand(params));
-      return result.Attributes;
+      
+      // Return only required fields
+      return {
+        id: result.Attributes.id,
+        type: result.Attributes.type,
+        status: result.Attributes.status,
+        createdAt: result.Attributes.createdAt,
+        collectedData: result.Attributes.collectedData
+      };
     } catch (error) {
       console.error('❌ DynamoDB Update Error:', error);
       throw new Error(`Error updating chat request: ${error.message}`);
     }
   }
 
-  // Get all chat requests (for admin)
-  static async getAll(limit = 100) {
+  // Get all chat requests - NO LIMIT
+  static async getAll(status = null, backendApiKey = null) {
     try {
-      const params = {
-        TableName: TABLE_NAME,
-        IndexName: 'type-index',
-        KeyConditionExpression: 'type = :type',
-        ExpressionAttributeValues: {
-          ':type': 'chat-request'
-        },
-        Limit: limit,
-        ScanIndexForward: false
+      let params = {
+        TableName: TABLE_NAME
       };
 
-      const result = await dynamo.send(new QueryCommand(params));
-      return result.Items || [];
-    } catch (error) {
-      console.error('❌ GSI Query failed, falling back to scan:', error.message);
-      
-      const scanParams = {
-        TableName: TABLE_NAME,
-        Limit: limit,
-        FilterExpression: '#type = :type',
-        ExpressionAttributeNames: {
-          '#type': 'type'
-        },
-        ExpressionAttributeValues: {
-          ':type': 'chat-request'
-        }
-      };
+      // Add filters if provided
+      let filterExpressions = [];
+      let expressionAttributeValues = {};
+      let expressionAttributeNames = {};
 
-      try {
-        const scanResult = await dynamo.send(new ScanCommand(scanParams));
-        return scanResult.Items || [];
-      } catch (scanError) {
-        console.error('❌ Scan also failed:', scanError);
-        throw new Error(`Error fetching all chat requests: ${scanError.message}`);
+      if (status) {
+        filterExpressions.push('#status = :status');
+        expressionAttributeNames['#status'] = 'status';
+        expressionAttributeValues[':status'] = status;
       }
+
+      if (backendApiKey) {
+        filterExpressions.push('backendApiKey = :backendApiKey');
+        expressionAttributeValues[':backendApiKey'] = backendApiKey;
+      }
+
+      if (filterExpressions.length > 0) {
+        params.FilterExpression = filterExpressions.join(' AND ');
+        params.ExpressionAttributeValues = expressionAttributeValues;
+        if (Object.keys(expressionAttributeNames).length > 0) {
+          params.ExpressionAttributeNames = expressionAttributeNames;
+        }
+      }
+
+      const result = await dynamo.send(new ScanCommand(params));
+      
+      // Map to return only required fields
+      const items = (result.Items || []).map(item => ({
+        id: item.id,
+        type: item.type,
+        status: item.status,
+        createdAt: item.createdAt,
+        collectedData: item.collectedData
+      }));
+      
+      console.log(`✅ Found ${items.length} total records`);
+      return items;
+    } catch (error) {
+      console.error('❌ Scan failed:', error);
+      throw new Error(`Error fetching all chat requests: ${error.message}`);
     }
   }
 
-  // Get chat requests by status
-  static async getByStatus(status, limit = 50) {
+  // Get chat requests by status - NO LIMIT
+  static async getByStatus(status) {
     try {
-      const params = {
-        TableName: TABLE_NAME,
-        IndexName: 'type-index',
-        KeyConditionExpression: 'type = :type',
-        FilterExpression: '#status = :status',
-        ExpressionAttributeNames: {
-          '#status': 'status'
-        },
-        ExpressionAttributeValues: {
-          ':type': 'chat-request',
-          ':status': status
-        },
-        Limit: limit,
-        ScanIndexForward: false
-      };
-
-      const result = await dynamo.send(new QueryCommand(params));
-      return result.Items || [];
+      const allRequests = await this.getAll();
+      const filtered = allRequests.filter(req => req.status === status);
+      console.log(`✅ Found ${filtered.length} records with status: ${status}`);
+      return filtered;
     } catch (error) {
-      console.error('❌ Status query failed, using getAll with filter:', error.message);
-      
-      const allRequests = await this.getAll(1000);
-      return allRequests
-        .filter(req => req.status === status)
-        .slice(0, limit);
+      console.error('❌ Status query failed:', error);
+      throw new Error(`Error fetching chat requests by status: ${error.message}`);
     }
   }
 
@@ -263,6 +311,45 @@ class ChatRequest {
     } catch (error) {
       console.error('❌ DynamoDB Delete Error:', error);
       throw new Error(`Error deleting chat request: ${error.message}`);
+    }
+  }
+
+  // Get count by backendApiKey
+  static async getCountByBackendApiKey(backendApiKey) {
+    try {
+      // Try using GSI first
+      try {
+        const params = {
+          TableName: TABLE_NAME,
+          IndexName: 'backendApiKey-index',
+          KeyConditionExpression: 'backendApiKey = :backendApiKey',
+          ExpressionAttributeValues: {
+            ':backendApiKey': backendApiKey
+          },
+          Select: 'COUNT'
+        };
+
+        const result = await dynamo.send(new QueryCommand(params));
+        console.log(`✅ Count for ${backendApiKey}: ${result.Count || 0}`);
+        return result.Count || 0;
+      } catch (gsiError) {
+        // Fallback to scan
+        const scanParams = {
+          TableName: TABLE_NAME,
+          FilterExpression: 'backendApiKey = :backendApiKey',
+          ExpressionAttributeValues: {
+            ':backendApiKey': backendApiKey
+          },
+          Select: 'COUNT'
+        };
+
+        const scanResult = await dynamo.send(new ScanCommand(scanParams));
+        console.log(`✅ Count via scan: ${scanResult.Count || 0}`);
+        return scanResult.Count || 0;
+      }
+    } catch (error) {
+      console.error('❌ Error counting by backendApiKey:', error);
+      throw new Error(`Error counting chat requests: ${error.message}`);
     }
   }
 

@@ -1,714 +1,434 @@
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
 require('dotenv').config();
+const axios = require('axios');
 
-// DynamoDB functions import
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
 
-const GEMINI_API_URL =
-  process.env.GEMINI_API_URL ||
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+/* ── Helper Functions ────────────────────────────────────────────── */
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-/* ======================
-   HELPER FUNCTIONS
-====================== */
-
-// Format simple string array
-const formatStringArray = (title, array) => {
-  if (!array || !Array.isArray(array) || array.length === 0) {
-    return `No ${title} information available`;
-  }
-  
-  return array.map(item => `- ${item}`).join('\n');
-};
-
-// Process aifuture data - UPDATED STRUCTURE
-const processAifutureData = (aifutureData) => {
-  const data = {};
-  
-  if (aifutureData && Array.isArray(aifutureData)) {
-    aifutureData.forEach(item => {
-      if (item.title && Array.isArray(item.value)) {
-        const formattedTitle = item.title.toLowerCase().trim();
-        data[formattedTitle] = {
-          originalTitle: item.title,
-          values: item.value
-        };
-      }
-    });
-  }
-  
-  return data;
-};
-
-// Get AI response from Gemini
-const getAIResponse = async (prompt) => {
-  try {
-    const response = await axios.post(
-      `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
-      {
-        contents: [
-          {
-            parts: [{ 
-              text: prompt 
-            }]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 200,
-          topP: 0.8,
-          topK: 40
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          }
-        ]
-      },
-      {
-        headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        timeout: 10000
-      }
-    );
-
-    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  } catch (error) {
-    console.error('Gemini API Error:', error.message);
-    return '';
-  }
-};
-
-// Clean text from emojis and special characters
 const cleanText = (text) => {
-  if (!text) return '';
-  
-  // Remove emojis and special characters, keep only letters, numbers, spaces, and basic punctuation
-  let cleaned = text.replace(/[^\w\s.,!?\-]/g, '');
-  
-  // Remove extra spaces
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-  
-  return cleaned;
+    if (!text) return '';
+    const parts = text.split('||').map(p => p.trim()).filter(Boolean);
+    const deduped = [...new Set(parts)];
+    let cleaned = deduped.join(' ');
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    return cleaned;
 };
 
-// Check if question matches any category
-const checkCategoryMatch = (question, categories) => {
-  if (!question || !categories || !Array.isArray(categories)) {
-    return false;
-  }
-  
-  const questionLower = question.toLowerCase();
-  
-  // Check each category
-  for (const category of categories) {
-    if (typeof category === 'string') {
-      const categoryLower = category.toLowerCase();
-      
-      // Direct match
-      if (questionLower.includes(categoryLower) || categoryLower.includes(questionLower)) {
-        return true;
-      }
-      
-      // Word match
-      const categoryWords = categoryLower.split(/\s+/);
-      const questionWords = questionLower.split(/\s+/);
-      
-      for (const cWord of categoryWords) {
-        if (cWord.length > 3) {
-          for (const qWord of questionWords) {
-            if (qWord.length > 3 && (cWord.includes(qWord) || qWord.includes(cWord))) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  return false;
-};
-
-// OLD: Find matching value in aifuture data (पहले वाला logic)
-const findMatchingValue = (question, aifutureData) => {
-  const processedData = processAifutureData(aifutureData);
-  const questionLower = question.toLowerCase();
-  
-  let bestMatch = null;
-  let bestMatchTitle = '';
-  let highestScore = 0;
-  
-  // Search through all titles and values
-  Object.entries(processedData).forEach(([title, titleData]) => {
-    if (Array.isArray(titleData.values)) {
-      titleData.values.forEach(value => {
-        if (typeof value === 'string') {
-          const valueLower = value.toLowerCase();
-          
-          // Calculate match score
-          let score = 0;
-          
-          // Split into words
-          const questionWords = questionLower.split(/\W+/).filter(w => w.length > 2);
-          const valueWords = valueLower.split(/\W+/).filter(w => w.length > 2);
-          
-          // Check for word matches
-          questionWords.forEach(qWord => {
-            valueWords.forEach(vWord => {
-              if (qWord.includes(vWord) || vWord.includes(qWord)) {
-                score += 1;
-              }
-            });
-          });
-          
-          // Check for direct substring match
-          if (questionLower.includes(valueLower) || valueLower.includes(questionLower)) {
-            score += 3;
-          }
-          
-          // Update best match if this is better
-          if (score > highestScore) {
-            highestScore = score;
-            bestMatch = value;
-            bestMatchTitle = titleData.originalTitle;
-          }
-        }
-      });
-    }
-  });
-  
-  // Only return if we have a decent match
-  if (highestScore >= 1) {
-    return {
-      value: bestMatch,
-      title: bestMatchTitle,
-      score: highestScore
-    };
-  }
-  
-  return null;
-};
-
-// NEW: Find matching title in aifuture data
-const findMatchingTitle = (question, aifutureData) => {
-  const processedData = processAifutureData(aifutureData);
-  const questionLower = question.toLowerCase().trim();
-  
-  // List of common keywords that might indicate asking for services
-  
-  
-  // First, check for direct title matches
-  for (const [titleKey, titleData] of Object.entries(processedData)) {
-    const title = titleKey;
-    const originalTitle = titleData.originalTitle.toLowerCase();
+const processAifutureData = (aifutureData) => {
+    const data = {};
+    if (!Array.isArray(aifutureData)) return data;
     
-    // Check if question contains the title or vice versa
-    if (questionLower.includes(title) || title.includes(questionLower)) {
-      return {
-        titleKey: titleKey,
-        originalTitle: titleData.originalTitle,
-        values: titleData.values,
-        matchType: 'direct_title_match'
-      };
-    }
-    
-    // Check if original title is in question
-    if (questionLower.includes(originalTitle) || originalTitle.includes(questionLower)) {
-      return {
-        titleKey: titleKey,
-        originalTitle: titleData.originalTitle,
-        values: titleData.values,
-        matchType: 'original_title_match'
-      };
-    }
-  }
-  
-  // Second, check for keyword-based matches
-  let bestMatch = null;
-  let highestScore = 0;
-  
-  for (const [titleKey, titleData] of Object.entries(processedData)) {
-    const title = titleKey;
-    let score = 0;
-    
-    // Split into words
-    const titleWords = title.split(/\s+/);
-    const questionWords = questionLower.split(/\s+/);
-    
-    // Check for word matches
-    titleWords.forEach(tWord => {
-      if (tWord.length > 3) {
-        questionWords.forEach(qWord => {
-          if (qWord.length > 3) {
-            if (qWord.includes(tWord) || tWord.includes(qWord)) {
-              score += 2;
-            }
-          }
-        });
-      }
+    aifutureData.forEach(item => {
+        if (!item.title || !Array.isArray(item.value)) return;
+        const key = item.title.toLowerCase().trim();
+        data[key] = {
+            originalTitle: item.title,
+            values: item.value.map(v => {
+                if (typeof v === 'object' && v !== null) {
+                    return {
+                        name: v.name || '',
+                        price: v.price || '',
+                        description: cleanText(v.description || ''),
+                        tags: Array.isArray(v.tags) ? v.tags : []
+                    };
+                }
+                return { name: String(v), price: '', description: '', tags: [] };
+            })
+        };
     });
+    return data;
+};
+
+// Check message type
+const checkMessageType = (question) => {
+    const q = question.toLowerCase().trim();
     
-    // Check if question has service keywords
-   
+    const greetings = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'namaste'];
+    const goodbyes = ['bye', 'goodbye', 'see you', 'take care', 'farewell'];
+    const thanks = ['thank', 'thanks', 'thx', 'appreciate', 'grateful'];
     
-    // Update best match if score is higher
-    if (score > highestScore) {
-      highestScore = score;
-      bestMatch = {
-        titleKey: titleKey,
-        originalTitle: titleData.originalTitle,
-        values: titleData.values,
-        matchType: 'keyword_match',
-        score: score
-      };
+    if (greetings.some(g => q === g || q.startsWith(g))) {
+        return { type: 'greeting' };
     }
-  }
-  
-  // Return best match if score is good enough
-  if (bestMatch && highestScore >= 1) {
+    if (goodbyes.some(g => q.includes(g))) {
+        return { type: 'goodbye' };
+    }
+    if (thanks.some(t => q.includes(t))) {
+        return { type: 'thanks' };
+    }
+    
+    return null;
+};
+
+// Call Gemini API
+const callGeminiAPI = async (prompt) => {
+    try {
+        const apiUrl = process.env.GEMINI_API_URL;
+        const apiKey = process.env.GEMINI_API_KEY;
+        
+        const response = await axios.post(
+            `${apiUrl}?key=${apiKey}`,
+            {
+                contents: [{
+                    parts: [{ text: prompt }]
+                }],
+                generationConfig: {
+                    temperature: 0.1,
+                    maxOutputTokens: 200,
+                    topP: 0.8,
+                    topK: 40
+                }
+            },
+            {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 15000
+            }
+        );
+        
+        if (response.data && response.data.candidates && response.data.candidates[0]) {
+            return response.data.candidates[0].content.parts[0].text;
+        }
+        return null;
+    } catch (error) {
+        console.error('Gemini API Error:', error.message);
+        return null;
+    }
+};
+
+// Step 1: Detect Intent
+const detectIntent = async (question, databaseContext) => {
+    try {
+        const q = question.toLowerCase();
+        
+        // Check for traffic/visitors question first
+        if (q.includes('visitor') || q.includes('traffic') || q.includes('not getting')) {
+            return { primary: 'SEO', confidence: 0.95 };
+        }
+        
+        const allServices = [];
+        Object.values(databaseContext.aifutureData || {}).forEach(category => {
+            category.values.forEach(service => {
+                allServices.push(service.name);
+            });
+        });
+        
+        const prompt = `
+Analyze user question and return ONLY JSON with intent.
+
+User Question: "${question}"
+
+Available Services: ${allServices.join(', ')}
+
+Return: {"intent": "TYPE"}
+
+Types: SEO, SALES, MARKETING, PRICING, WEBSITE, MAINTENANCE, SOFTWARE, GENERAL
+`;
+
+        const response = await callGeminiAPI(prompt);
+        
+        if (response) {
+            const cleaned = response.replace(/```json/g, '').replace(/```/g, '').trim();
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const intent = JSON.parse(jsonMatch[0]);
+                return { primary: intent.intent || 'GENERAL', confidence: 0.8 };
+            }
+        }
+        return { primary: 'GENERAL', confidence: 0.5 };
+        
+    } catch (error) {
+        console.error('Intent detection failed:', error.message);
+        return { primary: 'GENERAL', confidence: 0.5 };
+    }
+};
+
+// Step 2: Search in Roles
+const searchInRoles = (question, roles) => {
+    if (!Array.isArray(roles) || roles.length === 0) return null;
+    
+    const q = question.toLowerCase();
+    
+    for (const role of roles) {
+        const roleLower = role.toLowerCase();
+        if (q.includes(roleLower)) {
+            return {
+                type: 'role',
+                matched: role,
+                confidence: 0.9
+            };
+        }
+    }
+    return null;
+};
+
+// Step 3 & 4: Search in Role Values and Tags
+const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
+    const q = question.toLowerCase();
+    let bestMatch = null;
+    let highestScore = 0;
+    
+    for (const [categoryTitle, titleData] of Object.entries(aifutureData)) {
+        for (const svc of titleData.values) {
+            let score = 0;
+            const serviceName = svc.name.toLowerCase();
+            
+            // Intent-based boost
+            if (intent.primary === 'SEO' && serviceName === 'seo') {
+                score += 5.0;
+            }
+            
+            // Exact service name match
+            if (q.includes(serviceName)) {
+                score += 3.0;
+            }
+            
+            // Partial name match
+            serviceName.split(/\s+/).forEach(word => {
+                if (word.length > 2 && q.includes(word)) {
+                    score += 1.0;
+                }
+            });
+            
+            // Tag matching (Step 4)
+            if (Array.isArray(svc.tags) && svc.tags.length > 0) {
+                svc.tags.forEach(tag => {
+                    const tagLower = tag.toLowerCase();
+                    
+                    // Exact tag match
+                    if (q.includes(tagLower)) {
+                        score += 2.0;
+                    }
+                    
+                    // Partial tag match
+                    if (tagLower.split(' ').some(word => word.length > 2 && q.includes(word))) {
+                        score += 1.0;
+                    }
+                    
+                    // Intent keyword match with tag
+                    if (intent.primary === 'SEO' && (tagLower.includes('seo') || tagLower.includes('rank') || tagLower.includes('traffic'))) {
+                        score += 2.0;
+                    }
+                });
+            }
+            
+            if (score > highestScore && score >= 1.5) {
+                highestScore = score;
+                bestMatch = {
+                    type: 'role_value',
+                    service: svc,
+                    price: svc.price,
+                    description: svc.description,
+                    tags: svc.tags,
+                    confidence: Math.min(score / 6, 1)
+                };
+            }
+        }
+    }
+    
     return bestMatch;
-  }
-  
-  return null;
 };
 
-// OLD: Generate response from matched data (पहले वाला logic)
-const generateResponseFromMatch = (matchedValue, matchedTitle) => {
-  if (!matchedValue || !matchedTitle) {
-    return null;
-  }
-  
-  // Clean the matched value
-  const cleanValue = cleanText(matchedValue);
-  
-  if (!cleanValue) {
-    return null;
-  }
-  
-  // Create simple response
-  let response = `We offer ${cleanValue}`;
-  
-  // Use the title from database
-  const cleanTitle = cleanText(matchedTitle.toLowerCase());
-  response += ` ${cleanTitle} to boost your online business!`;
-  
-  // Extract first meaningful word for call to action
-  const words = cleanValue.split(' ');
-  let firstWord = words[0] || 'service';
-  
-  // Make sure first word is meaningful
-  if (firstWord.length < 3 || ['the', 'our', 'your', 'with', 'for'].includes(firstWord.toLowerCase())) {
-    firstWord = words.length > 1 ? words[1] : 'service';
-  }
-  
-  response += ` Would you like me to start the ${firstWord} process?`;
-  
-  // Final cleanup
-  response = cleanText(response);
-  
-  return response;
-};
-
-// NEW: Generate response from matched title with all values
-// NEW: Generate response from matched title with all values - UPDATED FOR COMMA FORMAT
-const generateResponseFromTitleMatch = (matchedTitle, values) => {
-  if (!matchedTitle || !values || !Array.isArray(values)) {
-    return null;
-  }
-  
-  // Format values as comma-separated list
-  let formattedList = '';
-  
-  if (values.length === 1) {
-    formattedList = values[0];
-  } else if (values.length === 2) {
-    formattedList = `${values[0]} and ${values[1]}`;
-  } else {
-    // Join all but last with commas, then "and" for the last one
-    formattedList = values.slice(0, -1).join(', ') + ', ' + values[values.length - 1];
-  }
-  
-  // Format the response based on title type
-  let response = '';
-  
-  // If it's "services" or similar
-  if (matchedTitle.toLowerCase().includes('service')) {
-    response = `We provide the following ${matchedTitle}: ${formattedList}. Which ${matchedTitle.toLowerCase()} are you interested in?`;
-  } 
-  // If it's products
-  else if (matchedTitle.toLowerCase().includes('product')) {
-    response = `We offer these ${matchedTitle}: ${formattedList}. Would you like more information about any specific ${matchedTitle.toLowerCase()}?`;
-  }
-  // Generic response for other titles
-  else {
-    response = `Here are our ${matchedTitle}: ${formattedList}. Let me know if you need details about any specific item from our ${matchedTitle.toLowerCase()}.`;
-  }
-  
-  return response;
-};
-
-// Check if question is asking for list/overview of services/products
-const isAskingForList = (question) => {
-  const questionLower = question.toLowerCase();
-  const listKeywords = [
-    'what services', 'what products', 'list', 'tell me about', 
-    'all services', 'all products', 'everything', 'overview',
-    'what do you provide', 'what do you offer', 'what do you have',
-    'types of', 'kinds of', 'variety of'
-  ];
-  
-  for (const keyword of listKeywords) {
-    if (questionLower.includes(keyword)) {
-      return true;
+// Step 5: Generate Response based on match found
+const generateResponse = (match, roleMatch, databaseContext, messageType, intent) => {
+    
+    // Greeting responses
+    if (messageType?.type === 'greeting') {
+        return "Hello! How may I assist you with our services today?";
     }
-  }
-  
-  return false;
+    if (messageType?.type === 'goodbye') {
+        return "Thank you for connecting with us. Have a great day!";
+    }
+    if (messageType?.type === 'thanks') {
+        return "You're welcome! Feel free to reach out if you need any assistance.";
+    }
+    
+    // Step 2 Result: Role match found
+    if (roleMatch) {
+        return `I can connect you with our ${roleMatch.matched} team. They will assist you with your requirements. Would you like me to proceed?`;
+    }
+    
+    // Step 3 & 4 Result: Role value or tag match found
+    if (match && match.service) {
+        let response = match.service.name;
+        if (match.price && match.price.trim()) {
+            response += ` — ${match.price}`;
+        }
+        response += '. ';
+        
+        // Clean description
+        let description = match.service.description || '';
+        if (description.includes('||')) {
+            description = description.split('||')[0];
+        }
+        
+        if (description.trim()) {
+            response += description;
+        }
+        response += ' Would you be interested in learning more about this service?';
+        return response;
+    }
+    
+    // Step 5: No match found - Categories related formal message
+    const categories = databaseContext.categories;
+    
+    if (categories.length === 1) {
+        return `Based on our services in ${categories[0]}, could you please provide more specific details about your requirements so I can assist you better?`;
+    }
+    
+    if (categories.length > 1) {
+        const categoryList = categories.join(', ');
+        return `Based on our services in ${categoryList}, could you please provide more specific details about your requirements so I can assist you better?`;
+    }
+    
+    return "Could you please provide more specific details about your requirements so I can assist you better?";
 };
 
-/* ======================
-   MAIN API ROUTE - UPDATED
-====================== */
+// Get suggestions from custom prompts - RETURNS EMPTY ARRAY WHEN NO MATCH
+const getSuggestions = (match, roleMatch, customPrompts, intent) => {
+    const prompts = Array.isArray(customPrompts) ? customPrompts : [];
+    
+    if (prompts.length === 0) {
+        return [];
+    }
+    
+    // ONLY return suggestions if there is a match (role or service)
+    if (!match && !roleMatch) {
+        // NO MATCH FOUND - return empty array
+        return [];
+    }
+    
+    // If service match found
+    if (match && match.service) {
+        const serviceName = match.service.name.toLowerCase();
+        
+        const relevantPrompts = prompts.filter(prompt => {
+            const promptLower = prompt.toLowerCase();
+            return promptLower.includes(serviceName) || 
+                   (intent.primary === 'SEO' && promptLower.includes('seo'));
+        });
+        
+        if (relevantPrompts.length > 0) {
+            return relevantPrompts.slice(0, 4);
+        }
+    }
+    
+    // If role match found
+    if (roleMatch) {
+        const roleName = roleMatch.matched.toLowerCase();
+        const relevantPrompts = prompts.filter(prompt => 
+            prompt.toLowerCase().includes(roleName)
+        );
+        if (relevantPrompts.length > 0) {
+            return relevantPrompts.slice(0, 4);
+        }
+    }
+    
+    // Intent-based suggestions (only if match exists)
+    if (intent.primary === 'SEO' && (match || roleMatch)) {
+        const seoPrompts = prompts.filter(p => 
+            p.toLowerCase().includes('seo') || 
+            p.toLowerCase().includes('rank') ||
+            p.toLowerCase().includes('traffic')
+        );
+        if (seoPrompts.length > 0) {
+            return seoPrompts.slice(0, 4);
+        }
+    }
+    
+    // Return empty array if no relevant prompts found
+    return [];
+};
+
+/* ── Main Route ─────────────────────────────────────────── */
 
 router.post('/generate-ai-response', async (req, res) => {
-  try {
-    const { 
-      question, 
-      apiKey 
-    } = req.body;
+    try {
+        const { question, apiKey } = req.body;
 
-    // Validation
-    if (!question || !question.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a question"
-      });
-    }
-
-    if (!apiKey) {
-      return res.status(400).json({
-        success: false,
-        message: "API key is required"
-      });
-    }
-
-    // Step 1: Get website data by API key
-    const websiteResult = await getWebsiteDataByApiKey(apiKey);
-    
-    if (!websiteResult.success || !websiteResult.data) {
-      return res.status(404).json({
-        success: false,
-        message: "Invalid API key or website not found"
-      });
-    }
-
-    const websiteData = websiteResult.data;
-    const websiteTitle = websiteData.websiteName || '';
-    const categories = Array.isArray(websiteData.category) ? websiteData.category : ['General'];
-    const aifuture = websiteData.aifuture || [];
-
-    // Step 2: Check if user is asking for list of services/products
-    const askingForList = isAskingForList(question);
-    
-    // Step 3: Try different matching strategies in priority order
-    let finalResponse = '';
-    let responseType = '';
-    let matchedData = null;
-
-    if (askingForList) {
-      // User is asking for list/overview - use title match
-      const titleMatch = findMatchingTitle(question, aifuture);
-      if (titleMatch) {
-        finalResponse = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
-      
-      
-      }
-    }
-    
-    // If no response yet, try old value matching (for specific service/product queries)
-    if (!finalResponse) {
-      const valueMatch = findMatchingValue(question, aifuture);
-      if (valueMatch) {
-        finalResponse = generateResponseFromMatch(valueMatch.value, valueMatch.title);
-    
-     
-      }
-    }
-    
-    // If still no response, try title matching (for other general title queries)
-    if (!finalResponse) {
-      const titleMatch = findMatchingTitle(question, aifuture);
-      if (titleMatch) {
-        finalResponse = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
-       
-      
-      }
-    }
-
-    // Step 4: If no match found, fallback to category logic
-    if (!finalResponse) {
-      // No title match, check category
-      const isCategoryRelated = checkCategoryMatch(question, categories);
-      
-      if (isCategoryRelated && aifuture.length > 0) {
-        // Category related but no match - show available titles
-        const processedData = processAifutureData(aifuture);
-        const availableTitles = Object.values(processedData).map(item => item.originalTitle);
+        if (!question?.trim()) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Question required' 
+            });
+        }
         
-        if (availableTitles.length > 0) {
-          finalResponse = `I can help you with information about our ${availableTitles.join(', ')}. `;
-          finalResponse += `For example, you can ask "What ${availableTitles[0].toLowerCase()} do you provide?"`;
-          responseType = 'available_titles';
-        } else {
-          // No data available
-          finalResponse = `I can help you with ${categories.join(', ')}. Please ask about our services or products.`;
-          responseType = 'category_only';
+        if (!apiKey) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'API key required' 
+            });
         }
-      } else {
-        // Not related to category
-        finalResponse = `I can only help with questions about our ${categories.join(', ')}. `;
-        finalResponse += `Please ask something related to our services or products.`;
-        responseType = 'category_mismatch';
-      }
-    }
 
-    // Ensure we have a response
-    if (!finalResponse || finalResponse.trim() === '') {
-      finalResponse = `I can help you with our services. What specific information are you looking for?`;
-      responseType = 'default';
-    }
+        // Get website data from database
+        const websiteResult = await getWebsiteDataByApiKey(apiKey);
+        
+        if (!websiteResult.success || !websiteResult.data) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Invalid API key or website not found' 
+            });
+        }
 
-    // Step 5: Return response
-    res.json({
-      success: true,
-      response: finalResponse,
-    
-      
-      
-      
-    });
+        const websiteData = websiteResult.data;
+        const aifutureData = processAifutureData(websiteData.aifuture || []);
+        const customPrompts = Array.isArray(websiteData.customPrompt) ? websiteData.customPrompt : [];
+        const categories = websiteData.category || [];
+        const roles = websiteData.role || [];
 
-  } catch (error) {
-    console.error("API Error:", error.message);
-    
-    let userMessage = "Unable to process your request at the moment.";
-    let statusCode = 500;
-    
-    if (error.response?.status === 404) {
-      userMessage = "API key not found.";
-      statusCode = 404;
-    } else if (error.code === 'ECONNABORTED') {
-      userMessage = "Request timeout. Please try again.";
-    } else if (error.response?.status === 429) {
-      userMessage = "Too many requests. Please wait a moment.";
-      statusCode = 429;
-    }
-
-    res.status(statusCode).json({
-      success: false,
-      message: userMessage,
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-/* ======================
-   SIMPLE DIRECT RESPONSE ENDPOINT - UPDATED
-====================== */
-
-router.post('/direct-response', async (req, res) => {
-  try {
-    const { question, apiKey } = req.body;
-
-    // Basic validation
-    if (!question || !question.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Question is required"
-      });
-    }
-
-    if (!apiKey) {
-      return res.status(400).json({
-        success: false,
-        message: "API key is required"
-      });
-    }
-
-    // Get website data
-    const websiteResult = await getWebsiteDataByApiKey(apiKey);
-    
-    if (!websiteResult.success || !websiteResult.data) {
-      return res.status(404).json({
-        success: false,
-        message: "Invalid API key"
-      });
-    }
-
-    const websiteData = websiteResult.data;
-    const categories = Array.isArray(websiteData.category) ? websiteData.category : ['General'];
-    const aifuture = websiteData.aifuture || [];
-
-    // Check what type of question it is
-    const askingForList = isAskingForList(question);
-    
-    let response = '';
-    let matchedData = null;
-    let hasMatch = false;
-
-    if (askingForList) {
-      // Try title match first for list questions
-      const titleMatch = findMatchingTitle(question, aifuture);
-      if (titleMatch) {
-        response = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
-        matchedData = {
-          title: titleMatch.originalTitle,
-          values: titleMatch.values
+        // Check message type
+        const messageType = checkMessageType(question);
+        
+        // Create database context
+        const databaseContext = {
+            categories: categories,
+            aifutureData: aifutureData,
+            customPrompts: customPrompts,
+            roles: roles
         };
-        hasMatch = true;
-      }
-    } else {
-      // Try value match first for specific questions
-      const valueMatch = findMatchingValue(question, aifuture);
-      if (valueMatch) {
-        response = generateResponseFromMatch(valueMatch.value, valueMatch.title);
-        matchedData = {
-          value: valueMatch.value,
-          title: valueMatch.title
-        };
-        hasMatch = true;
-      } else {
-        // If no value match, try title match
-        const titleMatch = findMatchingTitle(question, aifuture);
-        if (titleMatch) {
-          response = generateResponseFromTitleMatch(titleMatch.originalTitle, titleMatch.values);
-          matchedData = {
-            title: titleMatch.originalTitle,
-            values: titleMatch.values
-          };
-          hasMatch = true;
+
+        let intent = { primary: 'GENERAL', confidence: 0.5 };
+        let roleMatch = null;
+        let match = null;
+        
+        // Only process if not greeting/goodbye/thanks
+        if (!messageType) {
+            // Step 1: Detect intent
+            intent = await detectIntent(question, databaseContext);
+            console.log('Intent detected:', intent);
+            
+            // Step 2: Search in roles
+            roleMatch = searchInRoles(question, roles);
+            console.log('Role match:', roleMatch);
+            
+            // Step 3 & 4: Search in role values and tags (if no role match)
+            if (!roleMatch) {
+                match = searchInRoleValuesAndTags(question, aifutureData, intent);
+                console.log('Service/tag match:', match?.service?.name);
+            }
         }
-      }
+        
+        // Step 5: Generate response
+        const response = generateResponse(match, roleMatch, databaseContext, messageType, intent);
+        
+        // Get suggestions - will be empty array if no match found
+        const suggestions = getSuggestions(match, roleMatch, customPrompts, intent);
+
+        return res.json({
+            success: true,
+            intent: intent.primary,
+            response: response,
+            suggestions: suggestions
+        });
+
+    } catch (error) {
+        console.error('API Error:', error);
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Unable to process your request.'
+        });
     }
-
-    if (hasMatch && response) {
-      res.json({
-        success: true,
-        response: response,
-        matchedData: matchedData,
-        hasMatch: true,
-        matchType: askingForList ? 'title_match' : 'value_match'
-      });
-      return;
-    }
-
-    // No match found - show available titles
-    const processedData = processAifutureData(aifuture);
-    const availableTitles = Object.values(processedData).map(item => item.originalTitle);
-    
-    response = `I can help you with information about our ${categories.join(', ')}. `;
-    
-    if (availableTitles.length > 0) {
-      response += `We have data about: ${availableTitles.join(', ')}. `;
-      response += `Try asking about any of these.`;
-    } else {
-      response += `Please ask about our services or products.`;
-    }
-    
-    res.json({
-      success: true,
-      response: response,
-      hasMatch: false,
-      availableTitles: availableTitles,
-      availableCategories: categories
-    });
-
-  } catch (error) {
-    console.error("Direct Response Error:", error.message);
-    
-    res.status(500).json({
-      success: false,
-      message: "Unable to process your request",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-/* ======================
-   HEALTH CHECK
-====================== */
-
-router.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    message: "AI Response API is running",
-    timestamp: new Date().toISOString(),
-    hasApiKey: !!GEMINI_API_KEY,
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-/* ======================
-   API KEY VALIDATION
-====================== */
-
-router.post('/validate-api-key', async (req, res) => {
-  try {
-    const { apiKey } = req.body;
-
-    if (!apiKey) {
-      return res.status(400).json({
-        success: false,
-        message: "API key is required"
-      });
-    }
-
-    const websiteResult = await getWebsiteDataByApiKey(apiKey);
-    
-    if (websiteResult.success && websiteResult.data) {
-      const websiteData = websiteResult.data;
-      const processedData = processAifutureData(websiteData.aifuture || []);
-      const availableTitles = Object.values(processedData).map(item => item.originalTitle);
-      
-      res.json({
-        success: true,
-        valid: true,
-        website: {
-          name: websiteData.websiteName || '',
-          url: websiteData.websiteUrl || '',
-          categories: Array.isArray(websiteData.category) ? websiteData.category : ['General'],
-          hasAifutureData: websiteData.aifuture && websiteData.aifuture.length > 0,
-          availableTitles: availableTitles
-        }
-      });
-    } else {
-      res.json({
-        success: true,
-        valid: false,
-        message: "Invalid API key"
-      });
-    }
-
-  } catch (error) {
-    console.error("API Key Validation Error:", error.message);
-    
-    res.status(500).json({
-      success: false,
-      message: "Unable to validate API key",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
 });
 
 module.exports = router;

@@ -9,7 +9,11 @@ const bodyParser = require("body-parser");
 const path = require("path");
 require("dotenv").config();
 
+
+
+
 // ---------------------------
+
 //  Import Routes
 // ---------------------------
 const childPromptRoutes = require("./routes/promptsRoutes");
@@ -18,6 +22,10 @@ const chatRoutes = require("./routes/chatRoutes");
 const codeConfigRoutes = require("./routes/codeConfigRoutes");
 const aiRoutes = require("./routes/aiRoutes");
 const executeUrlsRoutes = require("./routes/executeUrls.routes");
+const chatmessageRoutes = require('./routes/chatmessageRoutes');
+const brandingRoutes = require('./routes/brandingRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
+const tokenDetailsRoutes = require('./routes/tokenDetailsRoutes');
 // ---------------------------
 //  Initialize App
 // ---------------------------
@@ -51,16 +59,23 @@ app.get("/", (req, res) => {
 // ---------------------------
 //  API Routes
 // ---------------------------
-
+// app.use('/auth', auth)
+app.use('/api', tokenDetailsRoutes);
+app.use('/analytics', analyticsRoutes);
+app.use('/api', chatmessageRoutes);
 app.use('/api', aiRoutes);
 app.use("/api/childprompt", childPromptRoutes);
 app.use("/api/websites", websiteRoutes);
 app.use("/api", chatRoutes);
 app.use("/api", executeUrlsRoutes);
 app.use("/code-config", codeConfigRoutes);
+app.use('/api', brandingRoutes);
 // ---------------------------
 //  Health Check Route
 // ---------------------------
+
+
+
 app.get("/health", (req, res) => {
   res.json({ 
     status: "OK", 

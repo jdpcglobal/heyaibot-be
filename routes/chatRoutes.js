@@ -9,13 +9,16 @@ router.get('/chat-requests/test', chatController.testConnection);
 // Create new chat request
 router.post('/chat-requests', chatController.createChatRequest);
 
-// Get all chat requests (main endpoint for admin)
+// Get all chat requests (with optional filters) - NO LIMIT
 router.get('/chat-requests', chatController.getAllChatRequests);
 
-// ✅ NEW: Get chat requests by backend API Key
+// Get chat requests by backend API Key - NO LIMIT
 router.get('/chat-requests/backend-api-key/:backendApiKey', chatController.getChatRequestsByBackendApiKey);
 
-// Get chat requests by website ID
+// Get count by backend API Key
+router.get('/chat-requests/backend-api-key/:backendApiKey/count', chatController.getCountByBackendApiKey);
+
+// Get chat requests by website ID - NO LIMIT
 router.get('/chat-requests/website/:websiteId', chatController.getChatRequestsByWebsite);
 
 // Get chat request by ID
