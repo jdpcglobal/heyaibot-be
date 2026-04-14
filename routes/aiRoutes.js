@@ -5,21 +5,18 @@ const axios = require('axios');
 
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
 
-/* ── Helper Functions ────────────────────────────────────────────── */
+/* ── Helpers ────────────────────────────────────────────────────── */
 
 const cleanText = (text) => {
     if (!text) return '';
     const parts = text.split('||').map(p => p.trim()).filter(Boolean);
-    const deduped = [...new Set(parts)];
-    let cleaned = deduped.join(' ');
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    return cleaned;
+    return [...new Set(parts)].join(' ').replace(/\s+/g, ' ').trim();
 };
 
 const processAifutureData = (aifutureData) => {
     const data = {};
     if (!Array.isArray(aifutureData)) return data;
-    
+
     aifutureData.forEach(item => {
         if (!item.title || !Array.isArray(item.value)) return;
         const key = item.title.toLowerCase().trim();
@@ -41,468 +38,308 @@ const processAifutureData = (aifutureData) => {
     return data;
 };
 
-// Check message type
+/* ── Step 0: Greeting / Goodbye / Thanks check ──────────────────── */
+
 const checkMessageType = (question) => {
     const q = question.toLowerCase().trim();
-    
     const greetings = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'namaste'];
-    const goodbyes = ['bye', 'goodbye', 'see you', 'take care', 'farewell'];
-    const thanks = ['thank', 'thanks', 'thx', 'appreciate', 'grateful'];
-    
-    if (greetings.some(g => q === g || q.startsWith(g))) {
-        return { type: 'greeting' };
-    }
-    if (goodbyes.some(g => q.includes(g))) {
-        return { type: 'goodbye' };
-    }
-    if (thanks.some(t => q.includes(t))) {
-        return { type: 'thanks' };
-    }
-    
+    const goodbyes  = ['bye', 'goodbye', 'see you', 'take care', 'farewell'];
+    const thanks    = ['thank', 'thanks', 'thx', 'appreciate', 'grateful'];
+
+    if (greetings.some(g => q === g || q.startsWith(g + ' '))) return { type: 'greeting' };
+    if (goodbyes.some(g => q.includes(g)))  return { type: 'goodbye' };
+    if (thanks.some(t => q.includes(t)))    return { type: 'thanks' };
     return null;
 };
 
-// Call Gemini API
+/* ── Gemini API call ────────────────────────────────────────────── */
+
 const callGeminiAPI = async (prompt) => {
     try {
-        const apiUrl = process.env.GEMINI_API_URL;
-        const apiKey = process.env.GEMINI_API_KEY;
-        
         const response = await axios.post(
-            `${apiUrl}?key=${apiKey}`,
+            `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
             {
-                contents: [{
-                    parts: [{ text: prompt }]
-                }],
-                generationConfig: {
-                    temperature: 0.1,
-                    maxOutputTokens: 200,
-                    topP: 0.8,
-                    topK: 40
-                }
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.1, maxOutputTokens: 200, topP: 0.8, topK: 40 }
             },
-            {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 15000
-            }
+            { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
         );
-        
-        if (response.data && response.data.candidates && response.data.candidates[0]) {
-            return response.data.candidates[0].content.parts[0].text;
-        }
-        return null;
-    } catch (error) {
-        console.error('Gemini API Error:', error.message);
+        return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    } catch (err) {
+        console.error('Gemini API Error:', err.message);
         return null;
     }
 };
 
-// Step 1: Detect Intent - ALWAYS returns intent (never GENERAL for valid questions)
-const detectIntent = async (question, databaseContext) => {
+/* ── Step 1: Dynamic intent detection (fully AI-driven) ─────────── */
+/*
+   - Collect ALL unique service names + tags from database
+   - Send them to AI along with the question
+   - AI returns the best matching intent keyword from the actual data
+   - No hardcoded SEO/SOFTWARE/WEBSITE — intent = whatever the business has
+*/
+
+const detectIntent = async (question, aifutureData) => {
     try {
+        // Build a flat list of all category titles (these become intent options)
+        const intentOptions = Object.values(aifutureData).map(c => c.originalTitle);
+
+        if (intentOptions.length === 0) return { primary: 'General', confidence: 0.5 };
+
+        // Quick keyword scan before AI call (saves latency)
         const q = question.toLowerCase();
-        
-        // Check for traffic/visitors question first
-        if (q.includes('visitor') || q.includes('traffic') || q.includes('not getting')) {
-            return { primary: 'SEO', confidence: 0.95 };
-        }
-        
-        // Check for service availability questions
-        if (q.includes('do you provide') || q.includes('do you offer') || q.includes('available')) {
-            const serviceMatch = q.match(/(?:provide|offer)\s+([^?]+)/i);
-            if (serviceMatch) {
-                const askedService = serviceMatch[1].trim().toLowerCase();
-                
-                const allServices = [];
-                Object.values(databaseContext.aifutureData || {}).forEach(category => {
-                    category.values.forEach(service => {
-                        allServices.push(service.name.toLowerCase());
-                    });
-                });
-                
-                if (allServices.some(s => s === askedService || s.includes(askedService) || askedService.includes(s))) {
-                    if (askedService.includes('seo')) return { primary: 'SEO', confidence: 0.95 };
-                    if (askedService.includes('website')) return { primary: 'WEBSITE', confidence: 0.95 };
-                    if (askedService.includes('app')) return { primary: 'SOFTWARE', confidence: 0.95 };
-                    if (askedService.includes('chatbot')) return { primary: 'SOFTWARE', confidence: 0.95 };
-                    if (askedService.includes('maintenance')) return { primary: 'MAINTENANCE', confidence: 0.95 };
-                    if (askedService.includes('ecommerce')) return { primary: 'WEBSITE', confidence: 0.95 };
-                    if (askedService.includes('software')) return { primary: 'SOFTWARE', confidence: 0.95 };
+        for (const [, category] of Object.entries(aifutureData)) {
+            const title = category.originalTitle.toLowerCase();
+            if (q.includes(title)) {
+                return { primary: category.originalTitle, confidence: 0.95 };
+            }
+            // Check if any service name in this category appears in question
+            for (const svc of category.values) {
+                if (svc.name && q.includes(svc.name.toLowerCase())) {
+                    return { primary: category.originalTitle, confidence: 0.9 };
                 }
             }
         }
-        
-        const allServices = [];
-        Object.values(databaseContext.aifutureData || {}).forEach(category => {
-            category.values.forEach(service => {
-                allServices.push(service.name);
-            });
-        });
-        
+
+        // AI call for semantic matching
         const prompt = `
-Analyze user question and return ONLY JSON with intent.
+You are an intent classifier. Return ONLY a JSON object.
 
 User Question: "${question}"
 
-Available Services: ${allServices.join(', ')}
+Available Categories (pick the closest one): ${intentOptions.join(', ')}
 
-Return: {"intent": "TYPE"}
+Return: {"intent": "<category name from the list above>"}
 
-Types: SEO, SALES, MARKETING, PRICING, WEBSITE, MAINTENANCE, SOFTWARE
-
-IMPORTANT: Never return GENERAL. Always return one of the above types based on the question.
-If question is about software/development, return SOFTWARE.
-If question is about website, return WEBSITE.
-If question is about SEO/traffic/ranking, return SEO.
-If question is about maintenance/bugs/hosting, return MAINTENANCE.
+Rules:
+- You MUST pick one from the list — do not invent a new category.
+- Pick the category most semantically related to the question.
+- If nothing fits, pick the first category from the list.
 `;
-
-        const response = await callGeminiAPI(prompt);
-        
-        if (response) {
-            const cleaned = response.replace(/```json/g, '').replace(/```/g, '').trim();
-            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const intent = JSON.parse(jsonMatch[0]);
-                // If intent is GENERAL or empty, default to SOFTWARE
-                let intentType = intent.intent || 'SOFTWARE';
-                if (intentType === 'GENERAL') intentType = 'SOFTWARE';
-                return { primary: intentType, confidence: 0.8 };
+        const raw = await callGeminiAPI(prompt);
+        if (raw) {
+            const cleaned = raw.replace(/```json|```/g, '').trim();
+            const match = cleaned.match(/\{[\s\S]*\}/);
+            if (match) {
+                const parsed = JSON.parse(match[0]);
+                const detected = parsed.intent?.trim();
+                // Validate: must be one of our categories (case-insensitive)
+                const found = intentOptions.find(o => o.toLowerCase() === detected?.toLowerCase());
+                if (found) return { primary: found, confidence: 0.8 };
             }
         }
-        // Default to SOFTWARE instead of GENERAL
-        return { primary: 'SOFTWARE', confidence: 0.5 };
-        
-    } catch (error) {
-        console.error('Intent detection failed:', error.message);
-        return { primary: 'SOFTWARE', confidence: 0.5 };
+
+        // Fallback: return first available category
+        return { primary: intentOptions[0], confidence: 0.5 };
+
+    } catch (err) {
+        console.error('Intent detection error:', err.message);
+        const fallback = Object.values(aifutureData)[0]?.originalTitle || 'General';
+        return { primary: fallback, confidence: 0.5 };
     }
 };
 
-// Step 2: Search in Roles
+/* ── Step 2: Role match ─────────────────────────────────────────── */
+
 const searchInRoles = (question, roles) => {
     if (!Array.isArray(roles) || roles.length === 0) return null;
-    
     const q = question.toLowerCase();
-    
+
     for (const role of roles) {
-        const roleLower = role.toLowerCase();
-        if (q.includes(roleLower)) {
-            return {
-                type: 'role',
-                matched: role,
-                confidence: 0.9
-            };
+        if (q.includes(role.toLowerCase())) {
+            return { type: 'role', matched: role, confidence: 0.9 };
         }
     }
     return null;
 };
 
-// Step 3 & 4: Search in Role Values and Tags
-const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
+/* ── Step 3 & 4: Value + Tag match ─────────────────────────────── */
+
+const searchInValuesAndTags = (question, aifutureData, intent) => {
     const q = question.toLowerCase();
     let bestMatch = null;
     let highestScore = 0;
-    
-    for (const [categoryTitle, titleData] of Object.entries(aifutureData)) {
-        for (const svc of titleData.values) {
+
+    for (const [, category] of Object.entries(aifutureData)) {
+        const isIntentCategory = category.originalTitle.toLowerCase() === intent.primary.toLowerCase();
+
+        for (const svc of category.values) {
+            if (!svc.name) continue;
             let score = 0;
-            const serviceName = svc.name.toLowerCase();
-            
-            // Direct ask patterns
-            const askPatterns = [
-                `do you provide ${serviceName}`,
-                `do you offer ${serviceName}`,
-                `${serviceName} services`,
-                `have ${serviceName}`,
-                `${serviceName} available`
-            ];
-            
-            let isDirectAsk = false;
-            for (const pattern of askPatterns) {
-                if (q.includes(pattern)) {
-                    isDirectAsk = true;
-                    score += 8.0;
-                    break;
-                }
+            const svcName = svc.name.toLowerCase();
+
+            // Boost if service belongs to detected intent's category
+            if (isIntentCategory) score += 3.0;
+
+            // Exact service name in question
+            if (q.includes(svcName)) {
+                score += 5.0;
             }
-            
-            // SEO special handling
-            if ((q.includes('seo') || q.includes('search engine optimization')) && serviceName === 'seo') {
-                score += 8.0;
-                isDirectAsk = true;
-            }
-            
-            // Intent-based boost
-            if (intent.primary === 'SEO' && (serviceName === 'seo' || serviceName.includes('seo'))) {
-                score += 6.0;
-            }
-            if (intent.primary === 'WEBSITE' && (serviceName.includes('website') || serviceName.includes('ecommerce'))) {
-                score += 6.0;
-            }
-            if (intent.primary === 'SOFTWARE' && (serviceName.includes('software') || serviceName.includes('app') || serviceName.includes('chatbot'))) {
-                score += 6.0;
-            }
-            if (intent.primary === 'MAINTENANCE' && serviceName.includes('maintenance')) {
-                score += 6.0;
-            }
-            
-            // Exact service name match
-            if (q.includes(serviceName)) {
+
+            // Partial word match on service name
+            svcName.split(/\s+/).forEach(word => {
+                if (word.length > 2 && q.includes(word)) score += 1.0;
+            });
+
+            // Direct ask patterns ("do you provide X", "do you offer X")
+            if (
+                q.includes(`provide ${svcName}`) ||
+                q.includes(`offer ${svcName}`) ||
+                q.includes(`${svcName} service`) ||
+                q.includes(`${svcName} available`)
+            ) {
                 score += 4.0;
             }
-            
-            // Partial name match
-            serviceName.split(/\s+/).forEach(word => {
-                if (word.length > 2 && q.includes(word)) {
-                    score += 1.0;
-                }
-            });
-            
-            // Tag matching
-            if (Array.isArray(svc.tags) && svc.tags.length > 0) {
+
+            // Tag matching (Step 4)
+            if (Array.isArray(svc.tags)) {
                 svc.tags.forEach(tag => {
                     const tagLower = tag.toLowerCase();
-                    
-                    if (q.includes(tagLower)) {
-                        score += 2.0;
-                    }
-                    
-                    if (tagLower.split(' ').some(word => word.length > 2 && q.includes(word))) {
-                        score += 1.0;
-                    }
-                    
-                    if (intent.primary === 'SEO' && (tagLower.includes('seo') || tagLower.includes('rank') || tagLower.includes('traffic'))) {
-                        score += 2.0;
+                    if (q.includes(tagLower)) score += 2.5;
+                    else {
+                        // Partial tag word match
+                        tagLower.split(' ').forEach(word => {
+                            if (word.length > 2 && q.includes(word)) score += 0.8;
+                        });
                     }
                 });
             }
-            
-            const threshold = isDirectAsk ? 1.0 : 1.5;
-            
-            if (score > highestScore && score >= threshold) {
+
+            if (score > highestScore && score >= 1.5) {
                 highestScore = score;
                 bestMatch = {
-                    type: 'role_value',
+                    type: 'service',
                     service: svc,
-                    price: svc.price,
-                    description: svc.description,
-                    tags: svc.tags,
-                    confidence: Math.min(score / 8, 1)
+                    confidence: Math.min(score / 10, 1)
                 };
             }
         }
     }
-    
+
     return bestMatch;
 };
 
-// Step 5: Generate Response based on match found
-const generateResponse = (match, roleMatch, databaseContext, messageType, intent, question) => {
-    
-    // Greeting responses
-    if (messageType?.type === 'greeting') {
-        return "Hello! How may I assist you with our services today?";
-    }
-    if (messageType?.type === 'goodbye') {
-        return "Thank you for connecting with us. Have a great day!";
-    }
-    if (messageType?.type === 'thanks') {
-        return "You're welcome! Feel free to reach out if you need any assistance.";
-    }
-    
-    // Step 2 Result: Role match found
+/* ── Step 5: Generate Response ──────────────────────────────────── */
+
+const generateResponse = ({ messageType, roleMatch, serviceMatch, intent, question, categories }) => {
+
+    // Greeting / Goodbye / Thanks
+    if (messageType?.type === 'greeting') return "Hello! How may I assist you today?";
+    if (messageType?.type === 'goodbye')  return "Thank you for connecting with us. Have a great day!";
+    if (messageType?.type === 'thanks')   return "You're welcome! Feel free to reach out anytime.";
+
+    // Role match
     if (roleMatch) {
         return `I can connect you with our ${roleMatch.matched} team. They will assist you with your requirements. Would you like me to proceed?`;
     }
-    
-    // Step 3 & 4 Result: Role value or tag match found
-    if (match && match.service) {
+
+    // Service / Value / Tag match
+    if (serviceMatch?.service) {
+        const svc = serviceMatch.service;
         const q = question.toLowerCase();
-        const isAskingForService = q.includes('do you provide') || q.includes('do you offer');
-        
-        let response = "";
-        
-        if (isAskingForService) {
-            response = `Yes, we provide ${match.service.name}. `;
-        }
-        
-        response += match.service.name;
-        if (match.price && match.price.trim()) {
-            response += ` — ${match.price}`;
-        }
-        response += '. ';
-        
-        let description = match.service.description || '';
-        if (description.includes('||')) {
-            description = description.split('||')[0];
-        }
-        
-        if (description.trim()) {
-            response += description;
-        }
-        response += ' Would you be interested in learning more about this service?';
+        const isDirectAsk = q.includes('do you provide') || q.includes('do you offer') || q.includes('available');
+
+        let response = isDirectAsk ? `Yes, we provide ${svc.name}. ` : `${svc.name}`;
+
+        if (!isDirectAsk && svc.price?.trim()) response += ` — ${svc.price}`;
+        if (isDirectAsk && svc.price?.trim()) response += `It is available at ${svc.price}. `;
+
+        const description = (svc.description || '').split('||')[0].trim();
+        if (description) response += ` ${description}`;
+
+        response += ' Would you like to know more about this service?';
         return response;
     }
-    
-    // NO MATCH FOUND - but intent remains same (not GENERAL)
-    // Return categories based message with the detected intent
-    const categories = databaseContext.categories;
-    
-    if (categories.length === 1) {
-        return `Based on our ${intent.primary} services in ${categories[0]}, could you please provide more specific details about your requirements so I can assist you better?`;
-    }
-    
-    if (categories.length > 1) {
-        const categoryList = categories.join(', ');
-        return `Based on our ${intent.primary} services in ${categoryList}, could you please provide more specific details about your requirements so I can assist you better?`;
-    }
-    
-    return `Based on our ${intent.primary} services, could you please provide more specific details about your requirements so I can assist you better?`;
+
+    // No match — return intent + ask for more details
+    const categoryList = categories.length > 0 ? categories.join(', ') : intent.primary;
+    return `I understand you're asking about ${intent.primary}. We offer services in: ${categoryList}. Could you please share more specific details about what you need so I can assist you better?`;
 };
 
-// Get suggestions from custom prompts - EMPTY WHEN NO MATCH
-const getSuggestions = (match, roleMatch, customPrompts, intent) => {
+/* ── Suggestions ────────────────────────────────────────────────── */
+
+const getSuggestions = ({ serviceMatch, roleMatch, customPrompts, intent }) => {
     const prompts = Array.isArray(customPrompts) ? customPrompts : [];
-    
-    if (prompts.length === 0) {
-        return [];
+    if (prompts.length === 0 || (!serviceMatch && !roleMatch)) return [];
+
+    const intentLower = intent.primary.toLowerCase();
+
+    // Match suggestions to service name or intent keyword
+    if (serviceMatch?.service) {
+        const svcLower = serviceMatch.service.name.toLowerCase();
+        const relevant = prompts.filter(p =>
+            p.toLowerCase().includes(svcLower) || p.toLowerCase().includes(intentLower)
+        );
+        if (relevant.length > 0) return relevant.slice(0, 4);
     }
-    
-    // ONLY return suggestions if there is a match (role or service)
-    if (!match && !roleMatch) {
-        // NO MATCH FOUND - return empty array
-        return [];
-    }
-    
-    // If service match found
-    if (match && match.service) {
-        const serviceName = match.service.name.toLowerCase();
-        
-        const relevantPrompts = prompts.filter(prompt => {
-            const promptLower = prompt.toLowerCase();
-            return promptLower.includes(serviceName) || 
-                   (intent.primary === 'SEO' && promptLower.includes('seo'));
-        });
-        
-        if (relevantPrompts.length > 0) {
-            return relevantPrompts.slice(0, 4);
-        }
-    }
-    
-    // If role match found
+
     if (roleMatch) {
-        const roleName = roleMatch.matched.toLowerCase();
-        const relevantPrompts = prompts.filter(prompt => 
-            prompt.toLowerCase().includes(roleName)
-        );
-        if (relevantPrompts.length > 0) {
-            return relevantPrompts.slice(0, 4);
-        }
+        const roleLower = roleMatch.matched.toLowerCase();
+        const relevant = prompts.filter(p => p.toLowerCase().includes(roleLower));
+        if (relevant.length > 0) return relevant.slice(0, 4);
     }
-    
-    // Intent-based suggestions (only if match exists)
-    if (intent.primary === 'SEO' && (match || roleMatch)) {
-        const seoPrompts = prompts.filter(p => 
-            p.toLowerCase().includes('seo') || 
-            p.toLowerCase().includes('rank') ||
-            p.toLowerCase().includes('traffic')
-        );
-        if (seoPrompts.length > 0) {
-            return seoPrompts.slice(0, 4);
-        }
-    }
-    
-    return [];
+
+    // Fallback: intent-based suggestions
+    const intentBased = prompts.filter(p => p.toLowerCase().includes(intentLower));
+    return intentBased.slice(0, 4);
 };
 
-/* ── Main Route ─────────────────────────────────────────── */
+/* ── Main Route ─────────────────────────────────────────────────── */
 
 router.post('/generate-ai-response', async (req, res) => {
     try {
         const { question, apiKey } = req.body;
 
-        if (!question?.trim()) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Question required' 
-            });
-        }
-        
-        if (!apiKey) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'API key required' 
-            });
-        }
+        if (!question?.trim()) return res.status(400).json({ success: false, message: 'Question required' });
+        if (!apiKey)           return res.status(400).json({ success: false, message: 'API key required' });
 
-        // Get website data from database
         const websiteResult = await getWebsiteDataByApiKey(apiKey);
-        
         if (!websiteResult.success || !websiteResult.data) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Invalid API key or website not found' 
-            });
+            return res.status(404).json({ success: false, message: 'Invalid API key or website not found' });
         }
 
-        const websiteData = websiteResult.data;
-        const aifutureData = processAifutureData(websiteData.aifuture || []);
-        const customPrompts = Array.isArray(websiteData.customPrompt) ? websiteData.customPrompt : [];
-        const categories = websiteData.category || [];
-        const roles = websiteData.role || [];
+        const websiteData    = websiteResult.data;
+        const aifutureData   = processAifutureData(websiteData.aifuture || []);
+        const customPrompts  = Array.isArray(websiteData.customPrompt) ? websiteData.customPrompt : [];
+        const categories     = websiteData.category || [];
+        const roles          = websiteData.role || [];
 
-        // Check message type
+        // Step 0: Greeting check
         const messageType = checkMessageType(question);
-        
-        // Create database context
-        const databaseContext = {
-            categories: categories,
-            aifutureData: aifutureData,
-            customPrompts: customPrompts,
-            roles: roles
-        };
 
-        let intent = { primary: 'SOFTWARE', confidence: 0.5 };
-        let roleMatch = null;
-        let match = null;
-        
-        // Only process if not greeting/goodbye/thanks
+        let intent       = { primary: Object.values(aifutureData)[0]?.originalTitle || 'General', confidence: 0.5 };
+        let roleMatch    = null;
+        let serviceMatch = null;
+
         if (!messageType) {
-            // Step 1: Detect intent
-            intent = await detectIntent(question, databaseContext);
-            console.log('Intent detected:', intent);
-            
-            // Step 2: Search in roles
+            // Step 1: Detect intent dynamically from DB categories
+            intent = await detectIntent(question, aifutureData);
+            console.log('Intent:', intent.primary);
+
+            // Step 2: Role match
             roleMatch = searchInRoles(question, roles);
-            console.log('Role match:', roleMatch);
-            
-            // Step 3 & 4: Search in role values and tags (if no role match)
+            console.log('Role match:', roleMatch?.matched || 'none');
+
+            // Step 3 & 4: Value + Tag match (only if no role match)
             if (!roleMatch) {
-                match = searchInRoleValuesAndTags(question, aifutureData, intent);
-                console.log('Service/tag match:', match?.service?.name);
+                serviceMatch = searchInValuesAndTags(question, aifutureData, intent);
+                console.log('Service match:', serviceMatch?.service?.name || 'none');
             }
         }
-        
-        // Step 5: Generate response
-        const response = generateResponse(match, roleMatch, databaseContext, messageType, intent, question);
-        
-        // Get suggestions - will be empty array if no match found
-        const suggestions = getSuggestions(match, roleMatch, customPrompts, intent);
+
+        const response = generateResponse({ messageType, roleMatch, serviceMatch, intent, question, categories });
+        const suggestions = getSuggestions({ serviceMatch, roleMatch, customPrompts, intent });
 
         return res.json({
             success: true,
-            intent: intent.primary,  // Intent remains what was detected (SEO, WEBSITE, SOFTWARE, etc.)
-            response: response,
-            suggestions: suggestions
+            intent: intent.primary,
+            response,
+            suggestions
         });
 
-    } catch (error) {
-        console.error('API Error:', error);
-        return res.status(500).json({ 
-            success: false, 
-            message: 'Unable to process your request.'
-        });
+    } catch (err) {
+        console.error('API Error:', err);
+        return res.status(500).json({ success: false, message: 'Unable to process your request.' });
     }
 });
 
