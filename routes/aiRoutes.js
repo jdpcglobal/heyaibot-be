@@ -97,7 +97,7 @@ const callGeminiAPI = async (prompt) => {
     }
 };
 
-// Step 1: Detect Intent
+// Step 1: Detect Intent - ALWAYS returns intent (never GENERAL for valid questions)
 const detectIntent = async (question, databaseContext) => {
     try {
         const q = question.toLowerCase();
@@ -109,12 +109,10 @@ const detectIntent = async (question, databaseContext) => {
         
         // Check for service availability questions
         if (q.includes('do you provide') || q.includes('do you offer') || q.includes('available')) {
-            // Extract service name from question
             const serviceMatch = q.match(/(?:provide|offer)\s+([^?]+)/i);
             if (serviceMatch) {
                 const askedService = serviceMatch[1].trim().toLowerCase();
                 
-                // Check if service exists in database
                 const allServices = [];
                 Object.values(databaseContext.aifutureData || {}).forEach(category => {
                     category.values.forEach(service => {
@@ -123,12 +121,13 @@ const detectIntent = async (question, databaseContext) => {
                 });
                 
                 if (allServices.some(s => s === askedService || s.includes(askedService) || askedService.includes(s))) {
-                    // Service exists, return appropriate intent
                     if (askedService.includes('seo')) return { primary: 'SEO', confidence: 0.95 };
                     if (askedService.includes('website')) return { primary: 'WEBSITE', confidence: 0.95 };
                     if (askedService.includes('app')) return { primary: 'SOFTWARE', confidence: 0.95 };
                     if (askedService.includes('chatbot')) return { primary: 'SOFTWARE', confidence: 0.95 };
                     if (askedService.includes('maintenance')) return { primary: 'MAINTENANCE', confidence: 0.95 };
+                    if (askedService.includes('ecommerce')) return { primary: 'WEBSITE', confidence: 0.95 };
+                    if (askedService.includes('software')) return { primary: 'SOFTWARE', confidence: 0.95 };
                 }
             }
         }
@@ -149,7 +148,13 @@ Available Services: ${allServices.join(', ')}
 
 Return: {"intent": "TYPE"}
 
-Types: SEO, SALES, MARKETING, PRICING, WEBSITE, MAINTENANCE, SOFTWARE, GENERAL
+Types: SEO, SALES, MARKETING, PRICING, WEBSITE, MAINTENANCE, SOFTWARE
+
+IMPORTANT: Never return GENERAL. Always return one of the above types based on the question.
+If question is about software/development, return SOFTWARE.
+If question is about website, return WEBSITE.
+If question is about SEO/traffic/ranking, return SEO.
+If question is about maintenance/bugs/hosting, return MAINTENANCE.
 `;
 
         const response = await callGeminiAPI(prompt);
@@ -159,14 +164,18 @@ Types: SEO, SALES, MARKETING, PRICING, WEBSITE, MAINTENANCE, SOFTWARE, GENERAL
             const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 const intent = JSON.parse(jsonMatch[0]);
-                return { primary: intent.intent || 'GENERAL', confidence: 0.8 };
+                // If intent is GENERAL or empty, default to SOFTWARE
+                let intentType = intent.intent || 'SOFTWARE';
+                if (intentType === 'GENERAL') intentType = 'SOFTWARE';
+                return { primary: intentType, confidence: 0.8 };
             }
         }
-        return { primary: 'GENERAL', confidence: 0.5 };
+        // Default to SOFTWARE instead of GENERAL
+        return { primary: 'SOFTWARE', confidence: 0.5 };
         
     } catch (error) {
         console.error('Intent detection failed:', error.message);
-        return { primary: 'GENERAL', confidence: 0.5 };
+        return { primary: 'SOFTWARE', confidence: 0.5 };
     }
 };
 
@@ -189,7 +198,7 @@ const searchInRoles = (question, roles) => {
     return null;
 };
 
-// Step 3 & 4: Search in Role Values and Tags - FIXED
+// Step 3 & 4: Search in Role Values and Tags
 const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
     const q = question.toLowerCase();
     let bestMatch = null;
@@ -200,7 +209,7 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
             let score = 0;
             const serviceName = svc.name.toLowerCase();
             
-            // CHECK: Does user ask specifically about this service?
+            // Direct ask patterns
             const askPatterns = [
                 `do you provide ${serviceName}`,
                 `do you offer ${serviceName}`,
@@ -213,12 +222,12 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
             for (const pattern of askPatterns) {
                 if (q.includes(pattern)) {
                     isDirectAsk = true;
-                    score += 8.0; // High score for direct ask
+                    score += 8.0;
                     break;
                 }
             }
             
-            // If user asks about "SEO services" and service is "SEO"
+            // SEO special handling
             if ((q.includes('seo') || q.includes('search engine optimization')) && serviceName === 'seo') {
                 score += 8.0;
                 isDirectAsk = true;
@@ -226,6 +235,15 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
             
             // Intent-based boost
             if (intent.primary === 'SEO' && (serviceName === 'seo' || serviceName.includes('seo'))) {
+                score += 6.0;
+            }
+            if (intent.primary === 'WEBSITE' && (serviceName.includes('website') || serviceName.includes('ecommerce'))) {
+                score += 6.0;
+            }
+            if (intent.primary === 'SOFTWARE' && (serviceName.includes('software') || serviceName.includes('app') || serviceName.includes('chatbot'))) {
+                score += 6.0;
+            }
+            if (intent.primary === 'MAINTENANCE' && serviceName.includes('maintenance')) {
                 score += 6.0;
             }
             
@@ -260,7 +278,6 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
                 });
             }
             
-            // Lowered threshold for direct asks
             const threshold = isDirectAsk ? 1.0 : 1.5;
             
             if (score > highestScore && score >= threshold) {
@@ -301,7 +318,6 @@ const generateResponse = (match, roleMatch, databaseContext, messageType, intent
     
     // Step 3 & 4 Result: Role value or tag match found
     if (match && match.service) {
-        // Check if user was asking "do you provide X" - give affirmative response
         const q = question.toLowerCase();
         const isAskingForService = q.includes('do you provide') || q.includes('do you offer');
         
@@ -317,7 +333,6 @@ const generateResponse = (match, roleMatch, databaseContext, messageType, intent
         }
         response += '. ';
         
-        // Clean description
         let description = match.service.description || '';
         if (description.includes('||')) {
             description = description.split('||')[0];
@@ -330,22 +345,23 @@ const generateResponse = (match, roleMatch, databaseContext, messageType, intent
         return response;
     }
     
-    // Step 5: No match found - Categories related formal message
+    // NO MATCH FOUND - but intent remains same (not GENERAL)
+    // Return categories based message with the detected intent
     const categories = databaseContext.categories;
     
     if (categories.length === 1) {
-        return `Based on our services in ${categories[0]}, could you please provide more specific details about your requirements so I can assist you better?`;
+        return `Based on our ${intent.primary} services in ${categories[0]}, could you please provide more specific details about your requirements so I can assist you better?`;
     }
     
     if (categories.length > 1) {
         const categoryList = categories.join(', ');
-        return `Based on our services in ${categoryList}, could you please provide more specific details about your requirements so I can assist you better?`;
+        return `Based on our ${intent.primary} services in ${categoryList}, could you please provide more specific details about your requirements so I can assist you better?`;
     }
     
-    return "Could you please provide more specific details about your requirements so I can assist you better?";
+    return `Based on our ${intent.primary} services, could you please provide more specific details about your requirements so I can assist you better?`;
 };
 
-// Get suggestions from custom prompts
+// Get suggestions from custom prompts - EMPTY WHEN NO MATCH
 const getSuggestions = (match, roleMatch, customPrompts, intent) => {
     const prompts = Array.isArray(customPrompts) ? customPrompts : [];
     
@@ -355,6 +371,7 @@ const getSuggestions = (match, roleMatch, customPrompts, intent) => {
     
     // ONLY return suggestions if there is a match (role or service)
     if (!match && !roleMatch) {
+        // NO MATCH FOUND - return empty array
         return [];
     }
     
@@ -446,7 +463,7 @@ router.post('/generate-ai-response', async (req, res) => {
             roles: roles
         };
 
-        let intent = { primary: 'GENERAL', confidence: 0.5 };
+        let intent = { primary: 'SOFTWARE', confidence: 0.5 };
         let roleMatch = null;
         let match = null;
         
@@ -463,19 +480,19 @@ router.post('/generate-ai-response', async (req, res) => {
             // Step 3 & 4: Search in role values and tags (if no role match)
             if (!roleMatch) {
                 match = searchInRoleValuesAndTags(question, aifutureData, intent);
-                console.log('Service/tag match:', match?.service?.name, 'Score:', match?.confidence);
+                console.log('Service/tag match:', match?.service?.name);
             }
         }
         
         // Step 5: Generate response
         const response = generateResponse(match, roleMatch, databaseContext, messageType, intent, question);
         
-        // Get suggestions
+        // Get suggestions - will be empty array if no match found
         const suggestions = getSuggestions(match, roleMatch, customPrompts, intent);
 
         return res.json({
             success: true,
-            intent: intent.primary,
+            intent: intent.primary,  // Intent remains what was detected (SEO, WEBSITE, SOFTWARE, etc.)
             response: response,
             suggestions: suggestions
         });
