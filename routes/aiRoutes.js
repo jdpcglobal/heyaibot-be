@@ -83,6 +83,7 @@ const detectIntent = async (question, aifutureData) => {
     try {
         // Build a flat list of all category titles (these become intent options)
         const intentOptions = Object.values(aifutureData).map(c => c.originalTitle);
+        const intentsMayBe=[];
 
         if (intentOptions.length === 0) return { primary: 'General', confidence: 0.5 };
 
@@ -91,12 +92,14 @@ const detectIntent = async (question, aifutureData) => {
         for (const [, category] of Object.entries(aifutureData)) {
             const title = category.originalTitle.toLowerCase();
             if (q.includes(title)) {
-                return { primary: category.originalTitle, confidence: 0.95 };
+                //return { primary: category.originalTitle, confidence: 0.95 };
+                //intentsMayBe.push(category.originalTitle);
             }
             // Check if any service name in this category appears in question
             for (const svc of category.values) {
                 if (svc.name && q.includes(svc.name.toLowerCase())) {
-                    return { primary: category.originalTitle, confidence: 0.9 };
+                    //return { primary: category.originalTitle, confidence: 0.9 };
+                    intentsMayBe.push(svc);
                 }
             }
         }
@@ -107,7 +110,7 @@ You are an intent classifier. Return ONLY a JSON object.
 
 User Question: "${question}"
 
-Available Categories (pick the closest one): ${intentOptions.join(', ')}
+Available Categories (pick the closest one): ${intentsMayBe.map(s => s.name).join(', ')}
 
 Return: {"intent": "<category name from the list above>"}
 
