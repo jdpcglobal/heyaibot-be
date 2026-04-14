@@ -5,17 +5,62 @@ const axios = require('axios');
 
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
 
-/* ── Gemini API Call ────────────────────────────────────────────── */
+/* ── Helpers ────────────────────────────────────────────────────── */
+
+const cleanText = (text) => {
+    if (!text) return '';
+    const parts = text.split('||').map(p => p.trim()).filter(Boolean);
+    return [...new Set(parts)].join(' ').replace(/\s+/g, ' ').trim();
+};
+
+const processAifutureData = (aifutureData) => {
+    const data = {};
+    if (!Array.isArray(aifutureData)) return data;
+
+    aifutureData.forEach(item => {
+        if (!item.title || !Array.isArray(item.value)) return;
+        const key = item.title.toLowerCase().trim();
+        data[key] = {
+            originalTitle: item.title,
+            values: item.value.map(v => {
+                if (typeof v === 'object' && v !== null) {
+                    return {
+                        name: v.name || '',
+                        price: v.price || '',
+                        description: cleanText(v.description || ''),
+                        tags: Array.isArray(v.tags) ? v.tags : []
+                    };
+                }
+                return { name: String(v), price: '', description: '', tags: [] };
+            })
+        };
+    });
+    return data;
+};
+
+/* ── Step 0: Greeting / Goodbye / Thanks check ──────────────────── */
+
+const checkMessageType = (question) => {
+    const q = question.toLowerCase().trim();
+    const greetings = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'namaste'];
+    const goodbyes  = ['bye', 'goodbye', 'see you', 'take care', 'farewell'];
+    const thanks    = ['thank', 'thanks', 'thx', 'appreciate', 'grateful'];
+
+    if (greetings.some(g => q === g || q.startsWith(g + ' '))) return { type: 'greeting' };
+    if (goodbyes.some(g => q.includes(g)))  return { type: 'goodbye' };
+    if (thanks.some(t => q.includes(t)))    return { type: 'thanks' };
+    return null;
+};
+
+/* ── Gemini API call ────────────────────────────────────────────── */
+
 const callGeminiAPI = async (prompt) => {
     try {
         const response = await axios.post(
             `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
             {
                 contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { 
-                    temperature: 0, 
-                    maxOutputTokens: 200
-                }
+                generationConfig: { temperature: 0.1, maxOutputTokens: 200, topP: 0.8, topK: 40 }
             },
             { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
         );
@@ -26,242 +71,276 @@ const callGeminiAPI = async (prompt) => {
     }
 };
 
-/* ── Step 1: Intent Extraction - Keyword based ─────────────────── */
-const extractIntentFromKeywords = (question) => {
+/* ── Step 1: Dynamic intent detection (fully AI-driven) ─────────── */
+/*
+   - Collect ALL unique service names + tags from database
+   - Send them to AI along with the question
+   - AI returns the best matching intent keyword from the actual data
+   - No hardcoded SEO/SOFTWARE/WEBSITE — intent = whatever the business has
+*/
+
+const detectIntent = async (question, aifutureData) => {
+    try {
+        // Build a flat list of all category titles (these become intent options)
+        const intentOptions = Object.values(aifutureData).map(c => c.originalTitle);
+
+        if (intentOptions.length === 0) return { primary: 'General', confidence: 0.5 };
+
+        // Quick keyword scan before AI call (saves latency)
+        const q = question.toLowerCase();
+        for (const [, category] of Object.entries(aifutureData)) {
+            const title = category.originalTitle.toLowerCase();
+            if (q.includes(title)) {
+                return { primary: category.originalTitle, confidence: 0.95 };
+            }
+            // Check if any service name in this category appears in question
+            for (const svc of category.values) {
+                if (svc.name && q.includes(svc.name.toLowerCase())) {
+                    return { primary: category.originalTitle, confidence: 0.9 };
+                }
+            }
+        }
+
+        // AI call for semantic matching
+        const prompt = `
+You are an intent classifier. Return ONLY a JSON object.
+
+User Question: "${question}"
+
+Available Categories (pick the closest one): ${intentOptions.join(', ')}
+
+Return: {"intent": "<category name from the list above>"}
+
+Rules:
+- You MUST pick one from the list — do not invent a new category.
+- Pick the category most semantically related to the question.
+- If nothing fits, pick the first category from the list.
+`;
+        const raw = await callGeminiAPI(prompt);
+        if (raw) {
+            const cleaned = raw.replace(/```json|```/g, '').trim();
+            const match = cleaned.match(/\{[\s\S]*\}/);
+            if (match) {
+                const parsed = JSON.parse(match[0]);
+                const detected = parsed.intent?.trim();
+                // Validate: must be one of our categories (case-insensitive)
+                const found = intentOptions.find(o => o.toLowerCase() === detected?.toLowerCase());
+                if (found) return { primary: found, confidence: 0.8 };
+            }
+        }
+
+        // Fallback: return first available category
+        return { primary: intentOptions[0], confidence: 0.5 };
+
+    } catch (err) {
+        console.error('Intent detection error:', err.message);
+        const fallback = Object.values(aifutureData)[0]?.originalTitle || 'General';
+        return { primary: fallback, confidence: 0.5 };
+    }
+};
+
+/* ── Step 2: Role match ─────────────────────────────────────────── */
+
+const searchInRoles = (question, roles) => {
+    if (!Array.isArray(roles) || roles.length === 0) return null;
     const q = question.toLowerCase();
-    
-    const intents = {
-        'seo': 'SEO Services',
-        'gaming website': 'Gaming Website Development',
-        'app development': 'App Development',
-        'digital marketing': 'Digital Marketing',
-        'web development': 'Web Development',
-        'content writing': 'Content Writing',
-        'pricing': 'Pricing Inquiry',
-        'wordpress': 'WordPress Development',
-        'ecommerce': 'E-commerce Development',
-        'logo design': 'Logo Design',
-        'graphic design': 'Graphic Design'
-    };
-    
-    for (const [key, value] of Object.entries(intents)) {
-        if (q.includes(key)) {
-            return value;
+
+    for (const role of roles) {
+        if (q.includes(role.toLowerCase())) {
+            return { type: 'role', matched: role, confidence: 0.9 };
         }
     }
     return null;
 };
 
-/* ── Step 2: Intent nikal (pehle keyword, fir Gemini) ──────────── */
-const getIntent = async (question) => {
-    // Pehle keyword se try
-    let intent = extractIntentFromKeywords(question);
-    if (intent) {
-        return { intent, method: 'keyword' };
-    }
-    
-    // Nahi toh Gemini se
-    const prompt = `Extract the main service intent from: "${question}"
-Return ONLY 2-4 words.
-Examples:
-"Do you provide SEO?" → "SEO Services"
-"Can you build a gaming website?" → "Gaming Website Development"
+/* ── Step 3 & 4: Value + Tag match ─────────────────────────────── */
 
-Intent:`;
-    
-    const geminiIntent = await callGeminiAPI(prompt);
-    intent = geminiIntent?.trim().replace(/["']/g, '') || 'General Inquiry';
-    return { intent, method: 'gemini' };
-};
+const searchInValuesAndTags = (question, aifutureData, intent) => {
+    const q = question.toLowerCase();
+    let bestMatch = null;
+    let highestScore = 0;
 
-/* ── Step 3: Database mein check karo - service hai ya nahi ─────── */
-const checkServiceInDatabase = (intent, aifutureData) => {
-    if (!aifutureData || Object.keys(aifutureData).length === 0) {
-        return { exists: false, reason: 'No data in database' };
-    }
-    
-    const intentLower = intent.toLowerCase();
-    
-    // Check in categories
-    for (const [key, category] of Object.entries(aifutureData)) {
-        const categoryLower = category.originalTitle.toLowerCase();
-        
-        // Exact category match
-        if (intentLower === categoryLower || 
-            categoryLower.includes(intentLower) || 
-            intentLower.includes(categoryLower)) {
-            return { 
-                exists: true, 
-                type: 'category',
-                data: category,
-                confidence: 'high'
-            };
-        }
-        
-        // Check in service names
-        for (const service of category.values) {
-            const serviceNameLower = service.name.toLowerCase();
-            if (intentLower === serviceNameLower ||
-                serviceNameLower.includes(intentLower) ||
-                intentLower.includes(serviceNameLower)) {
-                return {
-                    exists: true,
+    for (const [, category] of Object.entries(aifutureData)) {
+        const isIntentCategory = category.originalTitle.toLowerCase() === intent.primary.toLowerCase();
+
+        for (const svc of category.values) {
+            if (!svc.name) continue;
+            let score = 0;
+            const svcName = svc.name.toLowerCase();
+
+            // Boost if service belongs to detected intent's category
+            if (isIntentCategory) score += 3.0;
+
+            // Exact service name in question
+            if (q.includes(svcName)) {
+                score += 5.0;
+            }
+
+            // Partial word match on service name
+            svcName.split(/\s+/).forEach(word => {
+                if (word.length > 2 && q.includes(word)) score += 1.0;
+            });
+
+            // Direct ask patterns ("do you provide X", "do you offer X")
+            if (
+                q.includes(`provide ${svcName}`) ||
+                q.includes(`offer ${svcName}`) ||
+                q.includes(`${svcName} service`) ||
+                q.includes(`${svcName} available`)
+            ) {
+                score += 4.0;
+            }
+
+            // Tag matching (Step 4)
+            if (Array.isArray(svc.tags)) {
+                svc.tags.forEach(tag => {
+                    const tagLower = tag.toLowerCase();
+                    if (q.includes(tagLower)) score += 2.5;
+                    else {
+                        // Partial tag word match
+                        tagLower.split(' ').forEach(word => {
+                            if (word.length > 2 && q.includes(word)) score += 0.8;
+                        });
+                    }
+                });
+            }
+
+            if (score > highestScore && score >= 1.5) {
+                highestScore = score;
+                bestMatch = {
                     type: 'service',
-                    data: service,
-                    category: category.originalTitle,
-                    confidence: 'high'
+                    service: svc,
+                    confidence: Math.min(score / 10, 1)
                 };
             }
-            
-            // Check in tags
-            if (service.tags && Array.isArray(service.tags)) {
-                for (const tag of service.tags) {
-                    if (intentLower.includes(tag.toLowerCase())) {
-                        return {
-                            exists: true,
-                            type: 'service',
-                            data: service,
-                            category: category.originalTitle,
-                            confidence: 'medium'
-                        };
-                    }
-                }
-            }
         }
     }
-    
-    return { exists: false, reason: 'Service not found in database' };
+
+    return bestMatch;
 };
 
-/* ── Step 4: Response generate - match ho ya na ho ──────────────── */
-const generateFinalResponse = async (question, intent, dbCheck, aifutureData) => {
-    
-    // CASE 1: Service database mein MIL GAYI
-    if (dbCheck.exists) {
-        if (dbCheck.type === 'service' && dbCheck.data) {
-            const service = dbCheck.data;
-            let response = `✅ Yes, we provide ${service.name}.`;
-            if (service.price) response += ` Price: ${service.price}.`;
-            if (service.description) response += ` ${service.description.split('||')[0]}`;
-            response += ` Would you like to know more?`;
-            return response;
-        }
-        
-        if (dbCheck.type === 'category') {
-            return `✅ Yes, we offer ${dbCheck.data.originalTitle} services. Which specific service are you interested in?`;
-        }
+/* ── Step 5: Generate Response ──────────────────────────────────── */
+
+const generateResponse = ({ messageType, roleMatch, serviceMatch, intent, question, categories }) => {
+
+    // Greeting / Goodbye / Thanks
+    if (messageType?.type === 'greeting') return "Hello! How may I assist you today?";
+    if (messageType?.type === 'goodbye')  return "Thank you for connecting with us. Have a great day!";
+    if (messageType?.type === 'thanks')   return "You're welcome! Feel free to reach out anytime.";
+
+    // Role match
+    if (roleMatch) {
+        return `I can connect you with our ${roleMatch.matched} team. They will assist you with your requirements. Would you like me to proceed?`;
     }
-    
-    // CASE 2: Service database mein NAHI MILI - lekin jo intent nikala woh batao
-    const prompt = `User asked: "${question}"
-Detected intent: "${intent}"
 
-We DON'T have this exact service in our database.
+    // Service / Value / Tag match
+    if (serviceMatch?.service) {
+        const svc = serviceMatch.service;
+        const q = question.toLowerCase();
+        const isDirectAsk = q.includes('do you provide') || q.includes('do you offer') || q.includes('available');
 
-Generate a response that:
-1. Acknowledges they asked about: ${intent}
-2. Politely says we'll check if we offer it
-3. Asks for more specific details
-4. Keep it friendly and under 2 sentences
+        let response = isDirectAsk ? `Yes, we provide ${svc.name}. ` : `${svc.name}`;
 
-Response:`;
+        if (!isDirectAsk && svc.price?.trim()) response += ` — ${svc.price}`;
+        if (isDirectAsk && svc.price?.trim()) response += `It is available at ${svc.price}. `;
 
-    const aiResponse = await callGeminiAPI(prompt);
-    return aiResponse || `I see you're asking about ${intent}. Let me check if we offer this service. Could you please share more specific requirements?`;
+        const description = (svc.description || '').split('||')[0].trim();
+        if (description) response += ` ${description}`;
+
+        response += ' Would you like to know more about this service?';
+        return response;
+    }
+
+    // No match — return intent + ask for more details
+    const categoryList = categories.length > 0 ? categories.join(', ') : intent.primary;
+    return `I understand you're asking about ${intent.primary}. We offer services in: ${categoryList}. Could you please share more specific details about what you need so I can assist you better?`;
 };
 
-/* ── Step 5: Suggestions banao ──────────────────────────────────── */
-const getSuggestions = async (question, intent, dbCheck, customPrompts) => {
-    // Agar database mein service mili hai toh uske related suggestions
-    if (dbCheck.exists && dbCheck.type === 'service' && dbCheck.data) {
-        const serviceName = dbCheck.data.name;
-        const related = customPrompts.filter(p => 
-            p.toLowerCase().includes(serviceName.toLowerCase())
+/* ── Suggestions ────────────────────────────────────────────────── */
+
+const getSuggestions = ({ serviceMatch, roleMatch, customPrompts, intent }) => {
+    const prompts = Array.isArray(customPrompts) ? customPrompts : [];
+    if (prompts.length === 0 || (!serviceMatch && !roleMatch)) return [];
+
+    const intentLower = intent.primary.toLowerCase();
+
+    // Match suggestions to service name or intent keyword
+    if (serviceMatch?.service) {
+        const svcLower = serviceMatch.service.name.toLowerCase();
+        const relevant = prompts.filter(p =>
+            p.toLowerCase().includes(svcLower) || p.toLowerCase().includes(intentLower)
         );
-        if (related.length > 0) return related.slice(0, 3);
-        
-        return [
-            `Tell me more about ${serviceName}`,
-            `What is the pricing for ${serviceName}?`,
-            `Do you have packages for ${serviceName}?`
-        ];
+        if (relevant.length > 0) return relevant.slice(0, 4);
     }
-    
-    // Warna intent-based suggestions
-    return [
-        `Tell me more about ${intent}`,
-        `What is the pricing for ${intent}?`,
-        `Do you offer different packages for ${intent}?`
-    ];
+
+    if (roleMatch) {
+        const roleLower = roleMatch.matched.toLowerCase();
+        const relevant = prompts.filter(p => p.toLowerCase().includes(roleLower));
+        if (relevant.length > 0) return relevant.slice(0, 4);
+    }
+
+    // Fallback: intent-based suggestions
+    const intentBased = prompts.filter(p => p.toLowerCase().includes(intentLower));
+    return intentBased.slice(0, 4);
 };
 
-/* ── MAIN API ───────────────────────────────────────────────────── */
+/* ── Main Route ─────────────────────────────────────────────────── */
+
 router.post('/generate-ai-response', async (req, res) => {
     try {
         const { question, apiKey } = req.body;
 
-        if (!question?.trim()) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Question required!' 
-            });
-        }
-        
-        if (!apiKey) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'API key required!' 
-            });
-        }
+        if (!question?.trim()) return res.status(400).json({ success: false, message: 'Question required' });
+        if (!apiKey)           return res.status(400).json({ success: false, message: 'API key required' });
 
-        // Get website data from database
         const websiteResult = await getWebsiteDataByApiKey(apiKey);
         if (!websiteResult.success || !websiteResult.data) {
-            return res.status(404).json({ 
-                success: false, 
-                error: 'Invalid API key or website not found' 
-            });
+            return res.status(404).json({ success: false, message: 'Invalid API key or website not found' });
         }
 
-        const websiteData = websiteResult.data;
-        const aifutureData = websiteData.aifuture || [];
-        const customPrompts = Array.isArray(websiteData.customPrompt) ? websiteData.customPrompt : [];
+        const websiteData    = websiteResult.data;
+        const aifutureData   = processAifutureData(websiteData.aifuture || []);
+        const customPrompts  = Array.isArray(websiteData.customPrompt) ? websiteData.customPrompt : [];
+        const categories     = websiteData.category || [];
+        const roles          = websiteData.role || [];
 
-        // STEP 1: INTENT NIKAL
-        const { intent, method } = await getIntent(question);
-        console.log('Intent:', intent, '(Method:', method + ')');
+        // Step 0: Greeting check
+        const messageType = checkMessageType(question);
 
-        // STEP 2: DATABASE MEIN CHECK KAR
-        const dbCheck = checkServiceInDatabase(intent, aifutureData);
-        console.log('Database Check:', dbCheck);
+        let intent       = { primary: Object.values(aifutureData)[0]?.originalTitle || 'General', confidence: 0.5 };
+        let roleMatch    = null;
+        let serviceMatch = null;
 
-        // STEP 3: RESPONSE GENERATE KAR
-        const response = await generateFinalResponse(question, intent, dbCheck, aifutureData);
+        if (!messageType) {
+            // Step 1: Detect intent dynamically from DB categories
+            intent = await detectIntent(question, aifutureData);
+            console.log('Intent:', intent.primary);
 
-        // STEP 4: SUGGESTIONS
-        const suggestions = await getSuggestions(question, intent, dbCheck, customPrompts);
+            // Step 2: Role match
+            roleMatch = searchInRoles(question, roles);
+            console.log('Role match:', roleMatch?.matched || 'none');
 
-        // FINAL RESPONSE
+            // Step 3 & 4: Value + Tag match (only if no role match)
+            if (!roleMatch) {
+                serviceMatch = searchInValuesAndTags(question, aifutureData, intent);
+                console.log('Service match:', serviceMatch?.service?.name || 'none');
+            }
+        }
+
+        const response = generateResponse({ messageType, roleMatch, serviceMatch, intent, question, categories });
+        const suggestions = getSuggestions({ serviceMatch, roleMatch, customPrompts, intent });
+
         return res.json({
             success: true,
-            intent: intent,                    // Intent jo nikla
-            intent_method: method,              // keyword ya gemini
-            service_available: dbCheck.exists,  // database mein hai ya nahi
-            response: response,
-            suggestions: suggestions
+            intent: intent.primary,
+            response,
+            suggestions
         });
 
     } catch (err) {
         console.error('API Error:', err);
-        return res.status(500).json({ 
-            success: false, 
-            error: 'Server error!' 
-        });
+        return res.status(500).json({ success: false, message: 'Unable to process your request.' });
     }
 });
-
-module.exports = router;
-/* ── MAIN ROUTE ──────────────────────────────────────────────────── */
-
 
 module.exports = router;
