@@ -5,47 +5,51 @@ const axios = require('axios');
 
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
 
-/* ───────────────────────────────── */
-
+/* CLEAN TEXT */
 const cleanText = (text) => {
     if (!text) return '';
     return text.replace(/\s+/g, ' ').trim();
 };
 
+/* PROCESS DATA */
 const processAifutureData = (data) => {
+
     const services = [];
 
     if (!Array.isArray(data)) return services;
 
     data.forEach(item => {
+
         if (!item.title || !Array.isArray(item.value)) return;
 
         item.value.forEach(v => {
+
             services.push({
                 category: item.title,
                 name: v.name || '',
-                price: v.price || '',
                 description: cleanText(v.description || ''),
                 tags: Array.isArray(v.tags) ? v.tags : []
             });
+
         });
+
     });
 
     return services;
 };
 
-/* ───────────────────────────────── */
-/* GEMINI */
-
+/* GEMINI CALL */
 const callGemini = async (prompt) => {
+
     try {
+
         const response = await axios.post(
             `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
             {
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
-                    temperature: 0.2,
-                    maxOutputTokens: 150
+                    temperature: 0.3,
+                    maxOutputTokens: 200
                 }
             }
         );
@@ -58,103 +62,67 @@ const callGemini = async (prompt) => {
     }
 };
 
-/* ───────────────────────────────── */
-/* INTENT FROM QUESTION ONLY */
-
+/* INTENT DETECT */
 const detectIntent = async (question) => {
 
     const prompt = `
 User question: "${question}"
 
-Identify user intent in 2-4 words.
-Do not use categories.
+Return short intent in 2-4 words.
 
-Return JSON:
-{"intent":"short intent"}
+JSON:
+{"intent":""}
 `;
 
     const raw = await callGemini(prompt);
 
-    if(!raw) return "User inquiry";
-
     try {
         const parsed = JSON.parse(raw.replace(/```json|```/g,''));
-        return parsed.intent || "User inquiry";
+        return parsed.intent || question;
     } catch {
-        return "User inquiry";
+        return question;
     }
 };
 
-/* ───────────────────────────────── */
-/* SEARCH TAGS -> VALUE */
+/* TAG MATCH */
+const matchByTags = (intent, services) => {
 
-const searchServices = (question, services) => {
+    const i = intent.toLowerCase();
 
-    const q = question.toLowerCase();
-    const matches = [];
-
-    services.forEach(service => {
-
-        let score = 0;
-
-        /* TAG MATCH */
-        service.tags.forEach(tag=>{
-            if(q.includes(tag.toLowerCase()))
-                score += 3;
-        });
-
-        /* VALUE MATCH */
-        if(q.includes(service.name.toLowerCase()))
-            score += 5;
-
-        /* PARTIAL MATCH */
-        service.name.split(" ").forEach(word=>{
-            if(word.length > 2 && q.includes(word.toLowerCase()))
-                score += 1;
-        });
-
-        if(score > 0){
-            matches.push({
-                service,
-                score
-            });
-        }
-    });
-
-    return matches;
+    return services.find(service =>
+        service.tags.some(tag =>
+            i.includes(tag.toLowerCase())
+        )
+    );
 };
 
-/* ───────────────────────────────── */
-/* AI BEST PICK */
+/* VALUE MATCH */
+const matchByValue = (intent, services) => {
 
-const pickBestMatch = async (question, matches) => {
+    const i = intent.toLowerCase();
 
-    if(matches.length === 1)
-        return matches[0].service;
+    return services.find(service =>
+        i.includes(service.name.toLowerCase())
+    );
+};
 
-    const list = matches.map(m=>m.service.name).join(', ');
+/* GEMINI FALLBACK */
+const geminiFallback = async (question, categories) => {
 
     const prompt = `
 User question: "${question}"
 
-Choose most relevant:
-${list}
+Reply politely in formal language.
+Then ask a follow-up question related to these categories:
 
-Return only name
+${categories.join(', ')}
+
+Keep answer short.
 `;
 
-    const raw = await callGemini(prompt);
-
-    if(!raw) return matches[0].service;
-
-    const found = matches.find(m =>
-        raw.toLowerCase().includes(m.service.name.toLowerCase())
-    );
-
-    return found ? found.service : matches[0].service;
+    return await callGemini(prompt);
 };
 
-/* ───────────────────────────────── */
 /* MAIN API */
 
 router.post('/generate-ai-response', async (req, res) => {
@@ -163,20 +131,14 @@ try {
 
     const { question, apiKey } = req.body;
 
-    if(!question?.trim()){
+    if(!question || !apiKey){
         return res.status(400).json({
             success:false,
-            message:"Question required"
+            message:"question and apiKey required"
         });
     }
 
-    if(!apiKey){
-        return res.status(400).json({
-            success:false,
-            message:"API key required"
-        });
-    }
-
+    /* DB DATA */
     const websiteResult = await getWebsiteDataByApiKey(apiKey);
 
     if(!websiteResult.success){
@@ -186,28 +148,40 @@ try {
         });
     }
 
-    /* PROCESS DATA */
     const services = processAifutureData(
         websiteResult.data.aifuture || []
     );
 
-    /* INTENT (QUESTION BASED) */
+    /* 1. INTENT */
     const intent = await detectIntent(question);
 
-    /* SEARCH */
-    const matches = searchServices(question, services);
+    /* 2. TAG MATCH */
+    let match = matchByTags(intent, services);
 
-    let response = "Sorry, I couldn't find relevant service.";
+    /* 3. VALUE MATCH */
+    if(!match){
+        match = matchByValue(intent, services);
+    }
+
+    /* RESPONSE */
+    let response;
     let suggestions = [];
 
-    if(matches.length > 0){
-
-        const best = await pickBestMatch(question, matches);
+    if(match){
 
         response =
-`${best.name} ${best.description} Would you like to know more about this service?`;
+`${match.name} ${match.description} Would you like to know more about this service?`;
 
-        suggestions = [best.name];
+        suggestions = [match.name];
+
+    }else{
+
+        const categories = [...new Set(
+            services.map(s => s.category)
+        )];
+
+        response = await geminiFallback(question, categories);
+
     }
 
     return res.json({
@@ -221,7 +195,7 @@ try {
 
     console.error("API Error:", err);
 
-    return res.status(500).json({
+    res.status(500).json({
         success:false,
         message:"Server error"
     });

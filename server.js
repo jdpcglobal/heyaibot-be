@@ -16,7 +16,6 @@ require("dotenv").config();
 
 //  Import Routes
 // ---------------------------
-const intentRoutes = require('./routes/aichatRoutes');
 const childPromptRoutes = require("./routes/promptsRoutes");
 const websiteRoutes = require("./routes/websiteRoutes");
 const chatRoutes = require("./routes/chatRoutes");
@@ -61,7 +60,6 @@ app.get("/", (req, res) => {
 //  API Routes
 // ---------------------------
 // app.use('/auth', auth)
-app.use('/', intentRoutes);
 app.use('/api', tokenDetailsRoutes);
 app.use('/analytics', analyticsRoutes);
 app.use('/api', chatmessageRoutes);
