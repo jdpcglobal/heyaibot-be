@@ -84,15 +84,23 @@ JSON:
     }
 };
 
-/* TAG MATCH */
+/* TAG MATCH (MULTIPLE + PARTIAL) */
 const matchByTags = (intent, services) => {
 
     const i = intent.toLowerCase();
 
-    return services.find(service =>
-        service.tags.some(tag =>
-            i.includes(tag.toLowerCase())
-        )
+    return services.filter(service =>
+        service.tags.some(tag => {
+
+            const t = tag.toLowerCase();
+
+            return (
+                i.includes(t) ||
+                t.includes(i) ||
+                i.split(" ").some(word => t.includes(word))
+            );
+
+        })
     );
 };
 
@@ -101,9 +109,36 @@ const matchByValue = (intent, services) => {
 
     const i = intent.toLowerCase();
 
-    return services.find(service =>
+    return services.filter(service =>
         i.includes(service.name.toLowerCase())
     );
+};
+
+/* GEMINI PICK BEST */
+const pickBestByGemini = async (intent, matches) => {
+
+    if(matches.length === 1) return matches[0];
+
+    const names = matches.map(m => m.name).join(", ");
+
+    const prompt = `
+User intent: "${intent}"
+
+Choose most relevant service:
+${names}
+
+Return only name.
+`;
+
+    const raw = await callGemini(prompt);
+
+    if(!raw) return matches[0];
+
+    const found = matches.find(m =>
+        raw.toLowerCase().includes(m.name.toLowerCase())
+    );
+
+    return found || matches[0];
 };
 
 /* GEMINI FALLBACK */
@@ -112,10 +147,10 @@ const geminiFallback = async (question, categories) => {
     const prompt = `
 User question: "${question}"
 
-Reply politely in formal language.
-Then ask a follow-up question related to these categories:
+Reply politely in formal business tone.
+Then ask one follow-up question from these categories:
 
-${categories.join(', ')}
+${categories.join(", ")}
 
 Keep answer short.
 `;
@@ -156,17 +191,24 @@ try {
     const intent = await detectIntent(question);
 
     /* 2. TAG MATCH */
-    let match = matchByTags(intent, services);
+    let matches = matchByTags(intent, services);
 
     /* 3. VALUE MATCH */
-    if(!match){
-        match = matchByValue(intent, services);
+    if(matches.length === 0){
+        matches = matchByValue(intent, services);
     }
 
-    /* RESPONSE */
+    let match = null;
+
+    /* 4. MULTIPLE MATCH → GEMINI PICK */
+    if(matches.length > 0){
+        match = await pickBestByGemini(intent, matches);
+    }
+
     let response;
     let suggestions = [];
 
+    /* 5. MATCH FOUND */
     if(match){
 
         response =
@@ -176,6 +218,7 @@ try {
 
     }else{
 
+        /* 6. NO MATCH → GEMINI */
         const categories = [...new Set(
             services.map(s => s.category)
         )];
