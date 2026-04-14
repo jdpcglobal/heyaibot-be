@@ -107,6 +107,32 @@ const detectIntent = async (question, databaseContext) => {
             return { primary: 'SEO', confidence: 0.95 };
         }
         
+        // Check for service availability questions
+        if (q.includes('do you provide') || q.includes('do you offer') || q.includes('available')) {
+            // Extract service name from question
+            const serviceMatch = q.match(/(?:provide|offer)\s+([^?]+)/i);
+            if (serviceMatch) {
+                const askedService = serviceMatch[1].trim().toLowerCase();
+                
+                // Check if service exists in database
+                const allServices = [];
+                Object.values(databaseContext.aifutureData || {}).forEach(category => {
+                    category.values.forEach(service => {
+                        allServices.push(service.name.toLowerCase());
+                    });
+                });
+                
+                if (allServices.some(s => s === askedService || s.includes(askedService) || askedService.includes(s))) {
+                    // Service exists, return appropriate intent
+                    if (askedService.includes('seo')) return { primary: 'SEO', confidence: 0.95 };
+                    if (askedService.includes('website')) return { primary: 'WEBSITE', confidence: 0.95 };
+                    if (askedService.includes('app')) return { primary: 'SOFTWARE', confidence: 0.95 };
+                    if (askedService.includes('chatbot')) return { primary: 'SOFTWARE', confidence: 0.95 };
+                    if (askedService.includes('maintenance')) return { primary: 'MAINTENANCE', confidence: 0.95 };
+                }
+            }
+        }
+        
         const allServices = [];
         Object.values(databaseContext.aifutureData || {}).forEach(category => {
             category.values.forEach(service => {
@@ -163,7 +189,7 @@ const searchInRoles = (question, roles) => {
     return null;
 };
 
-// Step 3 & 4: Search in Role Values and Tags
+// Step 3 & 4: Search in Role Values and Tags - FIXED
 const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
     const q = question.toLowerCase();
     let bestMatch = null;
@@ -174,14 +200,38 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
             let score = 0;
             const serviceName = svc.name.toLowerCase();
             
+            // CHECK: Does user ask specifically about this service?
+            const askPatterns = [
+                `do you provide ${serviceName}`,
+                `do you offer ${serviceName}`,
+                `${serviceName} services`,
+                `have ${serviceName}`,
+                `${serviceName} available`
+            ];
+            
+            let isDirectAsk = false;
+            for (const pattern of askPatterns) {
+                if (q.includes(pattern)) {
+                    isDirectAsk = true;
+                    score += 8.0; // High score for direct ask
+                    break;
+                }
+            }
+            
+            // If user asks about "SEO services" and service is "SEO"
+            if ((q.includes('seo') || q.includes('search engine optimization')) && serviceName === 'seo') {
+                score += 8.0;
+                isDirectAsk = true;
+            }
+            
             // Intent-based boost
-            if (intent.primary === 'SEO' && serviceName === 'seo') {
-                score += 5.0;
+            if (intent.primary === 'SEO' && (serviceName === 'seo' || serviceName.includes('seo'))) {
+                score += 6.0;
             }
             
             // Exact service name match
             if (q.includes(serviceName)) {
-                score += 3.0;
+                score += 4.0;
             }
             
             // Partial name match
@@ -191,29 +241,29 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
                 }
             });
             
-            // Tag matching (Step 4)
+            // Tag matching
             if (Array.isArray(svc.tags) && svc.tags.length > 0) {
                 svc.tags.forEach(tag => {
                     const tagLower = tag.toLowerCase();
                     
-                    // Exact tag match
                     if (q.includes(tagLower)) {
                         score += 2.0;
                     }
                     
-                    // Partial tag match
                     if (tagLower.split(' ').some(word => word.length > 2 && q.includes(word))) {
                         score += 1.0;
                     }
                     
-                    // Intent keyword match with tag
                     if (intent.primary === 'SEO' && (tagLower.includes('seo') || tagLower.includes('rank') || tagLower.includes('traffic'))) {
                         score += 2.0;
                     }
                 });
             }
             
-            if (score > highestScore && score >= 1.5) {
+            // Lowered threshold for direct asks
+            const threshold = isDirectAsk ? 1.0 : 1.5;
+            
+            if (score > highestScore && score >= threshold) {
                 highestScore = score;
                 bestMatch = {
                     type: 'role_value',
@@ -221,7 +271,7 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
                     price: svc.price,
                     description: svc.description,
                     tags: svc.tags,
-                    confidence: Math.min(score / 6, 1)
+                    confidence: Math.min(score / 8, 1)
                 };
             }
         }
@@ -231,7 +281,7 @@ const searchInRoleValuesAndTags = (question, aifutureData, intent) => {
 };
 
 // Step 5: Generate Response based on match found
-const generateResponse = (match, roleMatch, databaseContext, messageType, intent) => {
+const generateResponse = (match, roleMatch, databaseContext, messageType, intent, question) => {
     
     // Greeting responses
     if (messageType?.type === 'greeting') {
@@ -251,7 +301,17 @@ const generateResponse = (match, roleMatch, databaseContext, messageType, intent
     
     // Step 3 & 4 Result: Role value or tag match found
     if (match && match.service) {
-        let response = match.service.name;
+        // Check if user was asking "do you provide X" - give affirmative response
+        const q = question.toLowerCase();
+        const isAskingForService = q.includes('do you provide') || q.includes('do you offer');
+        
+        let response = "";
+        
+        if (isAskingForService) {
+            response = `Yes, we provide ${match.service.name}. `;
+        }
+        
+        response += match.service.name;
         if (match.price && match.price.trim()) {
             response += ` — ${match.price}`;
         }
@@ -285,7 +345,7 @@ const generateResponse = (match, roleMatch, databaseContext, messageType, intent
     return "Could you please provide more specific details about your requirements so I can assist you better?";
 };
 
-// Get suggestions from custom prompts - RETURNS EMPTY ARRAY WHEN NO MATCH
+// Get suggestions from custom prompts
 const getSuggestions = (match, roleMatch, customPrompts, intent) => {
     const prompts = Array.isArray(customPrompts) ? customPrompts : [];
     
@@ -295,7 +355,6 @@ const getSuggestions = (match, roleMatch, customPrompts, intent) => {
     
     // ONLY return suggestions if there is a match (role or service)
     if (!match && !roleMatch) {
-        // NO MATCH FOUND - return empty array
         return [];
     }
     
@@ -337,7 +396,6 @@ const getSuggestions = (match, roleMatch, customPrompts, intent) => {
         }
     }
     
-    // Return empty array if no relevant prompts found
     return [];
 };
 
@@ -405,14 +463,14 @@ router.post('/generate-ai-response', async (req, res) => {
             // Step 3 & 4: Search in role values and tags (if no role match)
             if (!roleMatch) {
                 match = searchInRoleValuesAndTags(question, aifutureData, intent);
-                console.log('Service/tag match:', match?.service?.name);
+                console.log('Service/tag match:', match?.service?.name, 'Score:', match?.confidence);
             }
         }
         
         // Step 5: Generate response
-        const response = generateResponse(match, roleMatch, databaseContext, messageType, intent);
+        const response = generateResponse(match, roleMatch, databaseContext, messageType, intent, question);
         
-        // Get suggestions - will be empty array if no match found
+        // Get suggestions
         const suggestions = getSuggestions(match, roleMatch, customPrompts, intent);
 
         return res.json({
