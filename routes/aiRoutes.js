@@ -5,7 +5,7 @@ const axios = require('axios');
 
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
 
-/* ───────────────────────────────────────────── */
+/* ───────────────────────────────── */
 
 const cleanText = (text) => {
     if (!text) return '';
@@ -34,8 +34,8 @@ const processAifutureData = (data) => {
     return services;
 };
 
-/* ───────────────────────────────────────────── */
-/* GEMINI API */
+/* ───────────────────────────────── */
+/* GEMINI */
 
 const callGemini = async (prompt) => {
     try {
@@ -47,8 +47,7 @@ const callGemini = async (prompt) => {
                     temperature: 0.2,
                     maxOutputTokens: 150
                 }
-            },
-            { headers: { "Content-Type": "application/json" } }
+            }
         );
 
         return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
@@ -59,36 +58,34 @@ const callGemini = async (prompt) => {
     }
 };
 
-/* ───────────────────────────────────────────── */
-/* INTENT DETECTION */
+/* ───────────────────────────────── */
+/* INTENT FROM QUESTION ONLY */
 
-const detectIntent = async (question, categories) => {
-
-    if(categories.length === 0) return "General";
+const detectIntent = async (question) => {
 
     const prompt = `
-User Question: "${question}"
+User question: "${question}"
 
-Available categories:
-${categories.join(', ')}
+Identify user intent in 2-4 words.
+Do not use categories.
 
-Return JSON only:
-{"intent":"category name"}
+Return JSON:
+{"intent":"short intent"}
 `;
 
     const raw = await callGemini(prompt);
 
-    if(!raw) return categories[0];
+    if(!raw) return "User inquiry";
 
     try {
         const parsed = JSON.parse(raw.replace(/```json|```/g,''));
-        return parsed.intent || categories[0];
+        return parsed.intent || "User inquiry";
     } catch {
-        return categories[0];
+        return "User inquiry";
     }
 };
 
-/* ───────────────────────────────────────────── */
+/* ───────────────────────────────── */
 /* SEARCH TAGS -> VALUE */
 
 const searchServices = (question, services) => {
@@ -110,7 +107,7 @@ const searchServices = (question, services) => {
         if(q.includes(service.name.toLowerCase()))
             score += 5;
 
-        /* PARTIAL WORD MATCH */
+        /* PARTIAL MATCH */
         service.name.split(" ").forEach(word=>{
             if(word.length > 2 && q.includes(word.toLowerCase()))
                 score += 1;
@@ -127,23 +124,23 @@ const searchServices = (question, services) => {
     return matches;
 };
 
-/* ───────────────────────────────────────────── */
-/* AI BEST MATCH */
+/* ───────────────────────────────── */
+/* AI BEST PICK */
 
 const pickBestMatch = async (question, matches) => {
 
     if(matches.length === 1)
         return matches[0].service;
 
-    const options = matches.map(m=>m.service.name).join(', ');
+    const list = matches.map(m=>m.service.name).join(', ');
 
     const prompt = `
 User question: "${question}"
 
-Choose most relevant from:
-${options}
+Choose most relevant:
+${list}
 
-Return only service name
+Return only name
 `;
 
     const raw = await callGemini(prompt);
@@ -157,7 +154,7 @@ Return only service name
     return found ? found.service : matches[0].service;
 };
 
-/* ───────────────────────────────────────────── */
+/* ───────────────────────────────── */
 /* MAIN API */
 
 router.post('/generate-ai-response', async (req, res) => {
@@ -166,66 +163,65 @@ try {
 
     const { question, apiKey } = req.body;
 
-    if(!question?.trim())
+    if(!question?.trim()){
         return res.status(400).json({
             success:false,
             message:"Question required"
         });
+    }
 
-    if(!apiKey)
+    if(!apiKey){
         return res.status(400).json({
             success:false,
             message:"API key required"
         });
+    }
 
     const websiteResult = await getWebsiteDataByApiKey(apiKey);
 
-    if(!websiteResult.success)
+    if(!websiteResult.success){
         return res.status(404).json({
             success:false,
             message:"Invalid API key"
         });
+    }
 
     /* PROCESS DATA */
     const services = processAifutureData(
         websiteResult.data.aifuture || []
     );
 
-    /* CATEGORY LIST */
-    const categories = [
-        ...new Set(services.map(s => s.category))
-    ];
-
-    /* INTENT */
-    const intent = await detectIntent(question, categories);
+    /* INTENT (QUESTION BASED) */
+    const intent = await detectIntent(question);
 
     /* SEARCH */
     const matches = searchServices(question, services);
 
     let response = "Sorry, I couldn't find relevant service.";
+    let suggestions = [];
 
     if(matches.length > 0){
 
-        const bestService = await pickBestMatch(question, matches);
+        const best = await pickBestMatch(question, matches);
 
-        response = `${bestService.name}`;
+        response =
+`${best.name} ${best.description} Would you like to know more about this service?`;
 
-        if(bestService.price)
-            response += ` - ${bestService.price}`;
-
-        if(bestService.description)
-            response += `. ${bestService.description}`;
+        suggestions = [best.name];
     }
 
     return res.json({
         success:true,
         intent,
-        response
+        response,
+        suggestions
     });
 
 } catch(err){
+
     console.error("API Error:", err);
-    res.status(500).json({
+
+    return res.status(500).json({
         success:false,
         message:"Server error"
     });
