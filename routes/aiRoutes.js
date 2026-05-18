@@ -5,245 +5,288 @@ const axios = require('axios');
 
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
 
-/* CLEAN TEXT */
-const cleanText = (text) => {
-    if (!text) return '';
-    return text.replace(/\s+/g, ' ').trim();
-};
-
-/* PROCESS DATA */
-const processAifutureData = (data) => {
-
-    const services = [];
-
-    if (!Array.isArray(data)) return services;
-
-    data.forEach(item => {
-
-        if (!item.title || !Array.isArray(item.value)) return;
-
-        item.value.forEach(v => {
-
-            services.push({
-                category: item.title,
-                name: v.name || '',
-                description: cleanText(v.description || ''),
-                tags: Array.isArray(v.tags) ? v.tags : []
-            });
-
-        });
-
-    });
-
-    return services;
-};
-
-/* GEMINI CALL */
-const callGemini = async (prompt) => {
-
+/* ─────────────────────────────
+   GEMINI CALL
+──────────────────────────── */
+const gemini = async (prompt) => {
     try {
-
-        const response = await axios.post(
+        const res = await axios.post(
             `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
             {
                 contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    temperature: 0.3,
-                    maxOutputTokens: 200
-                }
+                generationConfig: { temperature: 0.1 }
             }
         );
-
-        return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
-
+        return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
     } catch (err) {
-        console.error("Gemini Error:", err.message);
         return null;
     }
 };
 
-/* INTENT DETECT */
-const detectIntent = async (question) => {
+/* ─────────────────────────────
+   FLATTEN SERVICES
+──────────────────────────── */
+const flattenServices = (data = []) => {
+    const services = [];
+    data.forEach(section => {
+        (section.value || []).forEach(v => {
+            services.push({
+                name: v.name,
+                description: v.description,
+                tags: v.tags || []
+            });
+        });
+    });
+    return services;
+};
 
-    const prompt = `
+/* ─────────────────────────────
+   GREETING CHECK
+──────────────────────────── */
+const GREETINGS = [
+    'hi','hello','hey','hii','helo','sup','yo',
+    'good morning','good afternoon','good evening',
+    'namaste','salaam','hola','greetings','howdy'
+];
+const isGreeting = (text) => {
+    const clean = text.trim().toLowerCase().replace(/[^a-z ]/g, '').trim();
+    return GREETINGS.includes(clean);
+};
+
+/* ─────────────────────────────
+   STEP 1: DIRECT TAG MATCH — No AI
+   Check if question words directly match
+   any service tag or service name
+──────────────────────────── */
+const directMatch = (question, services) => {
+    const q = question.toLowerCase();
+    let bestService = null;
+    let bestScore = 0;
+
+    services.forEach(service => {
+        let score = 0;
+
+        // Check service name words
+        const nameWords = service.name.toLowerCase().split(' ');
+        nameWords.forEach(word => {
+            if (word.length > 2 && q.includes(word)) score += 3;
+        });
+
+        // Check tags
+        service.tags.forEach(tag => {
+            const tagLower = tag.toLowerCase();
+            if (q.includes(tagLower)) score += 2;
+            // partial word match
+            tagLower.split(' ').forEach(word => {
+                if (word.length > 3 && q.includes(word)) score += 1;
+            });
+        });
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestService = service;
+        }
+    });
+
+    return bestScore >= 2 ? bestService : null;
+};
+
+/* ─────────────────────────────
+   STEP 2: AI DEEP MATCH
+   Only called when direct match fails
+──────────────────────────── */
+const aiMatch = async (question, services, customPrompt, categories) => {
+
+    const serviceList = services.map((s, i) =>
+`[${i}] Name: ${s.name}
+Tags: ${s.tags.join(", ")}
+Desc: ${s.description}`
+    ).join("\n\n");
+
+    const menuList = customPrompt.map((p, i) => `[${i}] ${p}`).join("\n");
+
+    const res = await gemini(`
+Business: ${categories.join(", ")}
 User question: "${question}"
 
-Return short intent in 2-4 words.
+Services:
+${serviceList}
 
-JSON:
-{"intent":""}
-`;
+Menu:
+${menuList}
 
-    const raw = await callGemini(prompt);
+Task: Match user question to best service.
+Think about what user truly wants — go beyond literal words.
+
+relevant=false ONLY for: food, body health, weather, sports, music, movies, travel, pets, personal topics.
+
+Return ONLY this JSON:
+{"relevant": true, "serviceIndex": 0, "menuIndex": 0, "intent": "short intent"}
+
+No match: {"relevant": true, "serviceIndex": -1, "menuIndex": -1, "intent": "short intent"}
+Not relevant: {"relevant": false, "serviceIndex": -1, "menuIndex": -1, "intent": "out of scope"}
+`);
 
     try {
-        const parsed = JSON.parse(raw.replace(/```json|```/g,''));
-        return parsed.intent || question;
+        const clean = res?.replace(/```json|```/g, '').trim();
+        const parsed = JSON.parse(clean);
+        return {
+            relevant: parsed.relevant === true,
+            serviceIndex: typeof parsed.serviceIndex === 'number' ? parsed.serviceIndex : -1,
+            menuIndex: typeof parsed.menuIndex === 'number' ? parsed.menuIndex : -1,
+            intent: parsed.intent || question
+        };
     } catch {
-        return question;
+        return { relevant: true, serviceIndex: -1, menuIndex: -1, intent: question };
     }
 };
 
-/* TAG MATCH (MULTIPLE + PARTIAL) */
-const matchByTags = (intent, services) => {
+/* ─────────────────────────────
+   BEST MENU SUGGESTION — No AI
+   Find customPrompt closest to service name
+──────────────────────────── */
+const getBestMenu = (serviceName, customPrompt) => {
+    if (!serviceName || !customPrompt.length) return -1;
 
-    const i = intent.toLowerCase();
+    const serviceWords = serviceName.toLowerCase().split(' ');
 
-    return services.filter(service =>
-        service.tags.some(tag => {
+    let bestIndex = -1;
+    let bestScore = 0;
 
-            const t = tag.toLowerCase();
+    customPrompt.forEach((p, i) => {
+        const pLower = p.toLowerCase();
+        let score = 0;
+        serviceWords.forEach(word => {
+            if (word.length > 2 && pLower.includes(word)) score++;
+        });
+        if (score > bestScore) {
+            bestScore = score;
+            bestIndex = i;
+        }
+    });
 
-            return (
-                i.includes(t) ||
-                t.includes(i) ||
-                i.split(" ").some(word => t.includes(word))
-            );
-
-        })
-    );
+    return bestScore > 0 ? bestIndex : -1;
 };
 
-/* VALUE MATCH */
-const matchByValue = (intent, services) => {
-
-    const i = intent.toLowerCase();
-
-    return services.filter(service =>
-        i.includes(service.name.toLowerCase())
-    );
+/* ─────────────────────────────
+   INTRO LINE
+──────────────────────────── */
+const getIntro = async (question) => {
+    return await gemini(
+        `User asked: "${question}"\nWrite 1 short friendly professional reply. Max 10 words. Return only the line.`
+    ) || "Sure, I can help you with that.";
 };
 
-/* GEMINI PICK BEST */
-const pickBestByGemini = async (intent, matches) => {
-
-    if(matches.length === 1) return matches[0];
-
-    const names = matches.map(m => m.name).join(", ");
-
-    const prompt = `
-User intent: "${intent}"
-
-Choose most relevant service:
-${names}
-
-Return only name.
-`;
-
-    const raw = await callGemini(prompt);
-
-    if(!raw) return matches[0];
-
-    const found = matches.find(m =>
-        raw.toLowerCase().includes(m.name.toLowerCase())
-    );
-
-    return found || matches[0];
+/* ─────────────────────────────
+   SUGGESTIONS
+   Match → 1 best | No match → all
+──────────────────────────── */
+const getSuggestions = (customPrompt, menuIndex) => {
+    if (!customPrompt.length) return [];
+    if (menuIndex >= 0 && menuIndex < customPrompt.length) {
+        return [customPrompt[menuIndex]];
+    }
+    return customPrompt;
 };
 
-/* GEMINI FALLBACK */
-const geminiFallback = async (question, categories) => {
-
-    const prompt = `
-User question: "${question}"
-
-Reply politely in formal business tone.
-Then ask one follow-up question from these categories:
-
-${categories.join(", ")}
-
-Keep answer short.
-`;
-
-    return await callGemini(prompt);
-};
-
-/* MAIN API */
-
+/* ─────────────────────────────
+   MAIN API
+──────────────────────────── */
 router.post('/generate-ai-response', async (req, res) => {
+    try {
+        const { question, apiKey } = req.body;
 
-try {
+        if (!question || !apiKey) {
+            return res.json({ success: false, message: "question and apiKey required" });
+        }
 
-    const { question, apiKey } = req.body;
+        const website = await getWebsiteDataByApiKey(apiKey);
+        if (!website.success) {
+            return res.json({ success: false, message: "Invalid apiKey" });
+        }
 
-    if(!question || !apiKey){
-        return res.status(400).json({
-            success:false,
-            message:"question and apiKey required"
+        const data = website.data;
+        const services = flattenServices(data.aifuture);
+
+        /* ── GREETING ── */
+        if (isGreeting(question)) {
+            return res.json({
+                success: true,
+                intent: "greeting",
+                response: data.systemPrompt?.[0] || "Hello! How can I help you today?",
+                suggestions: data.customPrompt
+            });
+        }
+
+        /* ── STEP 1: DIRECT TAG/NAME MATCH — No AI, instant ── */
+        let service = directMatch(question, services);
+        let intent = question;
+        let menuIndex = -1;
+
+        if (service) {
+            menuIndex = getBestMenu(service.name, data.customPrompt);
+        }
+
+        /* ── STEP 2: AI DEEP MATCH — only if direct match failed ── */
+        if (!service) {
+            const analysis = await aiMatch(question, services, data.customPrompt, data.category);
+            intent = analysis.intent;
+
+            if (!analysis.relevant) {
+                const msg = await gemini(`
+User asked: "${question}"
+Our services: ${data.category.join(", ")}
+Write 2 lines:
+Line 1: "We regret this is outside our area of expertise."
+Line 2: Ask one short question using: ${data.category.join(", ")}
+`);
+                return res.json({
+                    success: true,
+                    intent: "out_of_scope",
+                    response: msg || `We regret this is outside our expertise. Are you looking for ${data.category.join(" or ")}?`,
+                    suggestions: data.customPrompt
+                });
+            }
+
+            if (analysis.serviceIndex >= 0 && analysis.serviceIndex < services.length) {
+                service = services[analysis.serviceIndex];
+                menuIndex = analysis.menuIndex >= 0 ? analysis.menuIndex : getBestMenu(service.name, data.customPrompt);
+            }
+        }
+
+        /* ── SERVICE FOUND ── */
+        if (service) {
+            const introText = await getIntro(question);
+            const suggestions = getSuggestions(data.customPrompt, menuIndex);
+
+            return res.json({
+                success: true,
+                intent,
+                response: `${introText}\n\n${service.name}\n${service.description}\n\nWould you like a free quote or more details?`,
+                suggestions
+            });
+        }
+
+        /* ── NO MATCH ── */
+        const msg = await gemini(`
+User asked: "${question}"
+Our services: ${data.category.join(", ")}
+Write 2 lines:
+Line 1: "We apologize, we could not find an exact match for your query."
+Line 2: Ask one short specific question using: ${data.category.join(", ")}
+`);
+
+        return res.json({
+            success: true,
+            intent,
+            response: msg || `We apologize, we could not find an exact match. Are you looking for ${data.category.join(" or ")}?`,
+            suggestions: data.customPrompt
         });
+
+    } catch (err) {
+        console.error(err);
+        res.json({ success: false, message: "Server error" });
     }
-
-    /* DB DATA */
-    const websiteResult = await getWebsiteDataByApiKey(apiKey);
-
-    if(!websiteResult.success){
-        return res.status(404).json({
-            success:false,
-            message:"Invalid API key"
-        });
-    }
-
-    const services = processAifutureData(
-        websiteResult.data.aifuture || []
-    );
-
-    /* 1. INTENT */
-    const intent = await detectIntent(question);
-
-    /* 2. TAG MATCH */
-    let matches = matchByTags(intent, services);
-
-    /* 3. VALUE MATCH */
-    if(matches.length === 0){
-        matches = matchByValue(intent, services);
-    }
-
-    let match = null;
-
-    /* 4. MULTIPLE MATCH → GEMINI PICK */
-    if(matches.length > 0){
-        match = await pickBestByGemini(intent, matches);
-    }
-
-    let response;
-    let suggestions = [];
-
-    /* 5. MATCH FOUND */
-    if(match){
-
-        response =
-`${match.name} ${match.description} Would you like to know more about this service?`;
-
-        suggestions = [match.name];
-
-    }else{
-
-        /* 6. NO MATCH → GEMINI */
-        const categories = [...new Set(
-            services.map(s => s.category)
-        )];
-
-        response = await geminiFallback(question, categories);
-
-    }
-
-    return res.json({
-        success:true,
-        intent,
-        response,
-        suggestions
-    });
-
-} catch(err){
-
-    console.error("API Error:", err);
-
-    res.status(500).json({
-        success:false,
-        message:"Server error"
-    });
-}
-
 });
 
 module.exports = router;

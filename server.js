@@ -26,6 +26,7 @@ const chatmessageRoutes = require('./routes/chatmessageRoutes');
 const brandingRoutes = require('./routes/brandingRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const tokenDetailsRoutes = require('./routes/tokenDetailsRoutes');
+const aiChatRoutes = require('./routes/aichatRoutes');
 // ---------------------------
 //  Initialize App
 // ---------------------------
@@ -60,6 +61,7 @@ app.get("/", (req, res) => {
 //  API Routes
 // ---------------------------
 // app.use('/auth', auth)
+app.use('/api', aiChatRoutes);
 app.use('/api', tokenDetailsRoutes);
 app.use('/analytics', analyticsRoutes);
 app.use('/api', chatmessageRoutes);
