@@ -69,6 +69,57 @@ const ensureTagsStructure = (tags) => {
   return tagsStr ? [tagsStr] : [];
 };
 
+const processPdfDocumentsData = (documentsData) => {
+  if (!Array.isArray(documentsData)) return [];
+
+  return documentsData
+    .map((document) => ({
+      id: document?.id || uuidv4(),
+      fileName: document?.fileName ? String(document.fileName).trim() : 'document.pdf',
+      title: document?.title ? String(document.title).trim() : '',
+      category: Array.isArray(document?.category)
+        ? document.category.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      websiteName: document?.websiteName ? String(document.websiteName).trim() : '',
+      systemPrompt: Array.isArray(document?.systemPrompt)
+        ? document.systemPrompt.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      uploadedAt: document?.uploadedAt || new Date().toISOString(),
+      pageCount: Number(document?.pageCount || 0),
+      textLength: Number(document?.textLength || 0),
+      truncated: Boolean(document?.truncated),
+      summary: document?.summary ? String(document.summary).trim() : '',
+      description: document?.description ? String(document.description).trim() : '',
+      tags: Array.isArray(document?.tags)
+        ? document.tags.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      customPrompt: Array.isArray(document?.customPrompt)
+        ? document.customPrompt.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      aifuture: ensureAifutureStructure(document?.aifuture),
+      chunks: Array.isArray(document?.chunks)
+        ? document.chunks
+            .map((chunk) => ({
+              id: chunk?.id || uuidv4(),
+              title: chunk?.title ? String(chunk.title).trim() : 'General',
+              text: chunk?.text ? String(chunk.text).trim() : '',
+              description: chunk?.description ? String(chunk.description).trim() : '',
+              tags: Array.isArray(chunk?.tags)
+                ? chunk.tags.map((item) => String(item || '').trim()).filter(Boolean)
+                : [],
+              customPrompt: Array.isArray(chunk?.customPrompt)
+                ? chunk.customPrompt.map((item) => String(item || '').trim()).filter(Boolean)
+                : [],
+              aifuture: ensureAifutureStructure(chunk?.aifuture),
+            }))
+            .filter((chunk) => chunk.text.length > 0)
+        : [],
+    }))
+    .filter((document) => document.chunks.length > 0);
+};
+
+const ensurePdfDocumentsStructure = (documents) => processPdfDocumentsData(documents);
+
 // Updated processAifutureData to handle service objects with description and tags
 const processAifutureData = (aifutureData) => {
   let processedAifuture = [];
@@ -299,6 +350,7 @@ const saveWebsite = async (data) => {
     customPrompt: Array.isArray(data.customPrompt) ? data.customPrompt : [],
     category: Array.isArray(data.category) ? data.category : ['General'],
     aifuture,
+    pdfDocuments: processPdfDocumentsData(data.pdfDocuments),
     role,
     apiKey: data.apiKey || uuidv4(),
     status: data.status || 'active',
@@ -327,6 +379,7 @@ const getAllWebsites = async (apiKey = null, showAdminDeleted = false) => {
       const items = (result.Items || []).map(item => ({
         ...item,
         aifuture: ensureAifutureStructure(item.aifuture),
+        pdfDocuments: ensurePdfDocumentsStructure(item.pdfDocuments),
         role: ensureRoleStructure(item.role),
         tags: ensureTagsStructure(item.tags)
       }));
@@ -336,6 +389,7 @@ const getAllWebsites = async (apiKey = null, showAdminDeleted = false) => {
       let items = (result.Items || []).map(item => ({
         ...item,
         aifuture: ensureAifutureStructure(item.aifuture),
+        pdfDocuments: ensurePdfDocumentsStructure(item.pdfDocuments),
         role: ensureRoleStructure(item.role),
         tags: ensureTagsStructure(item.tags)
       }));
@@ -363,6 +417,7 @@ const getWebsitesByUserId = async (userId, showAdminDeleted = false) => {
     let items = (result.Items || []).map(item => ({
       ...item,
       aifuture: ensureAifutureStructure(item.aifuture),
+      pdfDocuments: ensurePdfDocumentsStructure(item.pdfDocuments),
       role: ensureRoleStructure(item.role),
       tags: ensureTagsStructure(item.tags)
     }));
@@ -388,6 +443,7 @@ const getWebsiteById = async (id) => {
       const item = {
         ...result.Item,
         aifuture: ensureAifutureStructure(result.Item.aifuture),
+        pdfDocuments: ensurePdfDocumentsStructure(result.Item.pdfDocuments),
         role: ensureRoleStructure(result.Item.role),
         tags: ensureTagsStructure(result.Item.tags)
       };
@@ -411,6 +467,7 @@ const getWebsiteByApiKey = async (apiKey) => {
       const item = {
         ...result.Items[0],
         aifuture: ensureAifutureStructure(result.Items[0].aifuture),
+        pdfDocuments: ensurePdfDocumentsStructure(result.Items[0].pdfDocuments),
         role: ensureRoleStructure(result.Items[0].role),
         tags: ensureTagsStructure(result.Items[0].tags)
       };
@@ -433,6 +490,7 @@ const getWebsiteDataByApiKey = async (apiKey) => {
       const item = {
         ...result.Items[0],
         aifuture: ensureAifutureStructure(result.Items[0].aifuture),
+        pdfDocuments: ensurePdfDocumentsStructure(result.Items[0].pdfDocuments),
         role: ensureRoleStructure(result.Items[0].role),
         tags: ensureTagsStructure(result.Items[0].tags)
       };
@@ -537,6 +595,7 @@ const updateWebsite = async (id, data) => {
     if (data.apiKey !== undefined) addUpdateField('apiKey', data.apiKey || existingItem.apiKey, 'api');
     if (data.role !== undefined) addUpdateField('role', processRoleData(data.role), 'role');
     if (data.aifuture !== undefined) addUpdateField('aifuture', processAifutureData(data.aifuture), 'ai');
+    if (data.pdfDocuments !== undefined) addUpdateField('pdfDocuments', processPdfDocumentsData(data.pdfDocuments), 'pdf');
 
     const result = await dynamo.send(new UpdateCommand({
       TableName: TABLE_NAME,
@@ -550,6 +609,7 @@ const updateWebsite = async (id, data) => {
     const attributes = {
       ...result.Attributes,
       aifuture: ensureAifutureStructure(result.Attributes?.aifuture),
+      pdfDocuments: ensurePdfDocumentsStructure(result.Attributes?.pdfDocuments),
       role: ensureRoleStructure(result.Attributes?.role),
       tags: ensureTagsStructure(result.Attributes?.tags)
     };
@@ -1181,6 +1241,7 @@ const updateWebsiteCustomData = async (id, data) => {
     if (data.urls !== undefined) addUpdateField('urls', Array.isArray(data.urls) ? data.urls : [], 'urls');
     if (data.library !== undefined) addUpdateField('library', Array.isArray(data.library) ? data.library : [], 'library');
     if (data.aifuture !== undefined) addUpdateField('aifuture', processAifutureData(data.aifuture), 'aifuture');
+    if (data.pdfDocuments !== undefined) addUpdateField('pdfDocuments', processPdfDocumentsData(data.pdfDocuments), 'pdfDocuments');
     if (data.role !== undefined) addUpdateField('role', processRoleData(data.role), 'role');
     if (data.description !== undefined) addUpdateField('description', data.description || '', 'desc');
     if (data.tags !== undefined) addUpdateField('tags', processTagsData(data.tags), 'tags');
@@ -1191,7 +1252,107 @@ const updateWebsiteCustomData = async (id, data) => {
       ExpressionAttributeValues: expressionAttributeValues,
       ReturnValues: 'ALL_NEW',
     }));
-    return { success: true, item: { ...result.Attributes, aifuture: ensureAifutureStructure(result.Attributes?.aifuture), role: ensureRoleStructure(result.Attributes?.role), tags: ensureTagsStructure(result.Attributes?.tags) } };
+    return { success: true, item: { ...result.Attributes, aifuture: ensureAifutureStructure(result.Attributes?.aifuture), pdfDocuments: ensurePdfDocumentsStructure(result.Attributes?.pdfDocuments), role: ensureRoleStructure(result.Attributes?.role), tags: ensureTagsStructure(result.Attributes?.tags) } };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+const addPdfDocumentToWebsite = async (id, documentData, metadata = {}) => {
+  const timestamp = new Date().toISOString();
+  try {
+    const existingResult = await dynamo.send(new GetCommand({ TableName: TABLE_NAME, Key: { id } }));
+    if (!existingResult.Item) return { success: false, error: 'Website not found' };
+
+    const pdfDocuments = ensurePdfDocumentsStructure(existingResult.Item.pdfDocuments);
+    const normalizedDocument = processPdfDocumentsData([documentData])[0];
+
+    if (!normalizedDocument) {
+      return { success: false, error: 'Invalid PDF document data' };
+    }
+
+    pdfDocuments.push(normalizedDocument);
+
+    const nextDescription = metadata.description || existingResult.Item.description || '';
+    const nextTags = metadata.tags && metadata.tags.length
+      ? [...new Set([...(ensureTagsStructure(existingResult.Item.tags)), ...processTagsData(metadata.tags)])]
+      : ensureTagsStructure(existingResult.Item.tags);
+    const nextSystemPrompt = metadata.systemPrompt && metadata.systemPrompt.length
+      ? metadata.systemPrompt
+      : (Array.isArray(existingResult.Item.systemPrompt) ? existingResult.Item.systemPrompt : []);
+    const nextCustomPrompt = metadata.customPrompt && metadata.customPrompt.length
+      ? metadata.customPrompt
+      : (Array.isArray(existingResult.Item.customPrompt) ? existingResult.Item.customPrompt : []);
+    const nextCategory = metadata.category && metadata.category.length
+      ? metadata.category
+      : (Array.isArray(existingResult.Item.category) ? existingResult.Item.category : []);
+    const nextWebsiteName = metadata.websiteName || existingResult.Item.websiteName || '';
+    const nextAiFuture = metadata.aifuture && metadata.aifuture.length
+      ? processAifutureData(metadata.aifuture)
+      : ensureAifutureStructure(existingResult.Item.aifuture);
+
+    const result = await dynamo.send(new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { id },
+      UpdateExpression: 'SET pdfDocuments = :pdfDocuments, websiteName = :websiteName, description = :description, tags = :tags, systemPrompt = :systemPrompt, customPrompt = :customPrompt, category = :category, aifuture = :aifuture, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':pdfDocuments': pdfDocuments,
+        ':websiteName': nextWebsiteName,
+        ':description': nextDescription,
+        ':tags': nextTags,
+        ':systemPrompt': nextSystemPrompt,
+        ':customPrompt': nextCustomPrompt,
+        ':category': nextCategory,
+        ':aifuture': nextAiFuture,
+        ':updatedAt': timestamp,
+      },
+      ReturnValues: 'ALL_NEW',
+    }));
+
+    return {
+      success: true,
+      item: {
+        ...result.Attributes,
+        aifuture: ensureAifutureStructure(result.Attributes?.aifuture),
+        pdfDocuments: ensurePdfDocumentsStructure(result.Attributes?.pdfDocuments),
+        role: ensureRoleStructure(result.Attributes?.role),
+        tags: ensureTagsStructure(result.Attributes?.tags),
+      },
+      document: normalizedDocument,
+      message: 'PDF document uploaded successfully',
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+const addPdfDocumentByApiKey = async (apiKey, documentData, metadata = {}) => {
+  try {
+    const websiteResult = await getWebsiteByApiKey(apiKey);
+    if (!websiteResult.success || !websiteResult.item?.id) {
+      return { success: false, error: 'No website found with this API key' };
+    }
+
+    return await addPdfDocumentToWebsite(websiteResult.item.id, documentData, metadata);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+const getPdfDocumentsByApiKey = async (apiKey) => {
+  try {
+    const websiteResult = await getWebsiteByApiKey(apiKey);
+    if (!websiteResult.success || !websiteResult.item) {
+      return { success: false, error: 'No website found with this API key' };
+    }
+
+    return {
+      success: true,
+      websiteId: websiteResult.item.id,
+      websiteName: websiteResult.item.websiteName || '',
+      pdfDocuments: ensurePdfDocumentsStructure(websiteResult.item.pdfDocuments),
+      count: ensurePdfDocumentsStructure(websiteResult.item.pdfDocuments).length,
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1256,6 +1417,7 @@ const getWebsiteByIdAndUserId = async (id, userId) => {
     if (!result.Item) return { success: false, error: 'Website not found' };
     if ((result.Item.userId || '') !== userId.trim()) return { success: false, error: 'Not authorized' };
     const item = { ...result.Item, aifuture: ensureAifutureStructure(result.Item.aifuture), role: ensureRoleStructure(result.Item.role), tags: ensureTagsStructure(result.Item.tags) };
+    item.pdfDocuments = ensurePdfDocumentsStructure(result.Item.pdfDocuments);
     return { success: true, item, message: 'Website retrieved successfully' };
   } catch (error) {
     return { success: false, error: error.message };
@@ -1292,6 +1454,7 @@ const updateWebsiteByUserId = async (id, data, userId) => {
     if (data.apiKey !== undefined) addUpdateField('apiKey', data.apiKey || existingItem.apiKey, 'api');
     if (data.role !== undefined) addUpdateField('role', processRoleData(data.role), 'role');
     if (data.aifuture !== undefined) addUpdateField('aifuture', processAifutureData(data.aifuture), 'ai');
+    if (data.pdfDocuments !== undefined) addUpdateField('pdfDocuments', processPdfDocumentsData(data.pdfDocuments), 'pdf');
     if (data.userId !== undefined) addUpdateField('userId', String(data.userId).trim(), 'uid');
     const result = await dynamo.send(new UpdateCommand({
       TableName: TABLE_NAME,
@@ -1301,7 +1464,7 @@ const updateWebsiteByUserId = async (id, data, userId) => {
       ExpressionAttributeNames: Object.keys(expressionAttributeNames).length > 0 ? expressionAttributeNames : undefined,
       ReturnValues: 'ALL_NEW',
     }));
-    return { success: true, item: { ...result.Attributes, aifuture: ensureAifutureStructure(result.Attributes?.aifuture), role: ensureRoleStructure(result.Attributes?.role), tags: ensureTagsStructure(result.Attributes?.tags) }, message: 'Website updated successfully' };
+    return { success: true, item: { ...result.Attributes, aifuture: ensureAifutureStructure(result.Attributes?.aifuture), pdfDocuments: ensurePdfDocumentsStructure(result.Attributes?.pdfDocuments), role: ensureRoleStructure(result.Attributes?.role), tags: ensureTagsStructure(result.Attributes?.tags) }, message: 'Website updated successfully' };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1330,6 +1493,7 @@ const getAllWebsitesByUserId = async (userId, showAdminDeleted = false) => {
     let items = (result.Items || []).map(item => ({
       ...item,
       aifuture: ensureAifutureStructure(item.aifuture),
+      pdfDocuments: ensurePdfDocumentsStructure(item.pdfDocuments),
       role: ensureRoleStructure(item.role),
       tags: ensureTagsStructure(item.tags)
     }));
@@ -1645,4 +1809,7 @@ module.exports = {
   addTagToWebsite,
   removeTagFromWebsite,
   getWebsitesByTag,
+  addPdfDocumentToWebsite,
+  addPdfDocumentByApiKey,
+  getPdfDocumentsByApiKey,
 };

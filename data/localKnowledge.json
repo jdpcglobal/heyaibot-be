@@ -1,0 +1,206 @@
+{
+  "pdfDocuments": [
+    {
+      "id": "9daa6718-169e-4f52-86af-1e921d002b15",
+      "fileName": "ml.pdf",
+      "uploadedAt": "2026-05-29T10:44:00.914Z",
+      "pageCount": 0,
+      "textLength": 14263,
+      "truncated": false,
+      "summary": "RAG Test Knowledge Base Artificial Intelligence, Machine Learning & Technology Chapter 1: Artificial Intelligence — An Overview Artificial Intelligence (AI) refers to the simulation of human intelligence processes by computer systems. These processes include learning (acquiring information and rules for using it), reasoning (using the rules to reach approximate or definite conclusions), and self-correction. AI was formally founded as an academic discipline in 1956 at the Dartmouth Conference, or",
+      "chunks": [
+        {
+          "id": "607affe2-58b4-4ac0-a84b-344a70fff1bc",
+          "title": "RAG Test Knowledge Base",
+          "text": "Artificial Intelligence, Machine Learning & Technology Chapter 1: Artificial Intelligence — An Overview Artificial Intelligence (AI) refers to the simulation of human intelligence processes by computer systems. These processes include learning (acquiring information and rules for using it), reasoning (using the rules to reach approximate or definite conclusions), and self-correction. AI was formally founded as an academic discipline in 1956 at the Dartmouth Conference, organized by John McCarthy, Marvin Minsky, Nathaniel Rochester, and Claude Shannon."
+        },
+        {
+          "id": "dfe5b8d8-f1bd-4450-8fb2-de31b3474231",
+          "title": "1.1 Types of Artificial Intelligence",
+          "text": "Narrow AI (ANI) — Also called weak AI, it is designed to perform a specific task, such as facial recognition, internet searches, or driving a car. All current AI systems, including GPT-4 and DALL-E, fall under this category. General AI (AGI) — A theoretical form of AI with generalized human cognitive abilities. When presented with an unfamiliar task, an AGI system would find a solution without human intervention. AGI does not yet exist. Super AI (ASI) — A hypothetical AI that surpasses human intelligence in all fields, including creativity, social skills, and general wisdom. ASI remains in the realm of science fiction and philosophical debate."
+        },
+        {
+          "id": "f8a4c451-1da3-41d1-9760-db9db62e4dd3",
+          "title": "Year Event Significance",
+          "text": "1950 Alan Turing proposes the Turing Test First formal criterion for machine intelligence 1956 Dartmouth Conference AI established as an academic field 1997 IBM Deep Blue beats Kasparov First AI to defeat a chess world champion 2011 IBM Watson wins Jeopardy! Natural language understanding breakthrough 2012 AlexNet wins ImageNet Deep learning revolution begins 2016 AlphaGo beats Lee Sedol AI masters complex strategic reasoning 2022 ChatGPT launched LLMs become mainstream; 1M users in 5 days 2023 GPT-4 released Multimodal AI with near-human reasoning"
+        },
+        {
+          "id": "0532093e-fbbf-4070-ab1e-7459b5d31794",
+          "title": "Chapter 2: Machine Learning",
+          "text": "Machine Learning (ML) is a subset of AI that gives systems the ability to automatically learn and improve from experience without being explicitly programmed. The term was coined by Arthur Samuel in 1959. ML focuses on developing computer programs that can access data and use it to learn for themselves."
+        },
+        {
+          "id": "0eeace79-d1b6-4ce7-a3a8-c09a6125f944",
+          "title": "2.1 Types of Machine Learning",
+          "text": "Supervised Learning — The algorithm is trained on labeled data. Examples include linear regression (predicting house prices), logistic regression (email spam detection), and support vector machines (image classification). Common algorithms: Decision Trees, Random Forest, Neural Networks. Unsupervised Learning — The algorithm learns from unlabeled data and finds hidden patterns. Examples include customer segmentation and anomaly detection. Common algorithms: K-Means Clustering, DBSCAN, Principal Component Analysis (PCA). Reinforcement Learning — The algorithm learns by interacting with an environment, receiving rewards or penalties. Used in game-playing AI (AlphaGo, OpenAI Five) and robotics. Key concepts: agent, environment, state, action, reward."
+        },
+        {
+          "id": "b0f3de4d-25e1-467c-ae7b-aa9186268546",
+          "title": "2.2 Popular ML Frameworks Comparison | Row 1",
+          "text": "2.2 Popular ML Frameworks Comparison: Framework Language Creator Best For Release Year TensorFlow Python/C++ Google Production deployment 2015"
+        },
+        {
+          "id": "5da51f04-803e-4ef2-a63d-56c54e684f7e",
+          "title": "2.2 Popular ML Frameworks Comparison | Row 2",
+          "text": "2.2 Popular ML Frameworks Comparison: Framework Language Creator Best For Release Year PyTorch Python Meta (Facebook) Research & prototyping 2016"
+        },
+        {
+          "id": "166d8f35-31d5-4683-acf7-f152bc4b7efd",
+          "title": "2.2 Popular ML Frameworks Comparison | Row 3",
+          "text": "2.2 Popular ML Frameworks Comparison: Framework Language Creator Best For Release Year Scikit-learn Python INRIA (France) Classical ML algorithms 2007"
+        },
+        {
+          "id": "031257fb-ba01-4d80-a264-f0e3b86a1272",
+          "title": "2.2 Popular ML Frameworks Comparison | Row 4",
+          "text": "2.2 Popular ML Frameworks Comparison: Framework Language Creator Best For Release Year Keras Python Francois Chollet Fast prototyping 2015"
+        },
+        {
+          "id": "a5dd19a5-0949-4619-85eb-d1a2a2e34d04",
+          "title": "2.2 Popular ML Frameworks Comparison | Row 5",
+          "text": "2.2 Popular ML Frameworks Comparison: Framework Language Creator Best For Release Year XGBoost Python/R Tianqi Chen Tabular data / Kaggle 2014"
+        },
+        {
+          "id": "fabec250-822d-43be-9bd9-1a49a9b98006",
+          "title": "2.2 Popular ML Frameworks Comparison | Row 6",
+          "text": "2.2 Popular ML Frameworks Comparison: Framework Language Creator Best For Release Year JAX Python Google Brain High-performance research 2018"
+        },
+        {
+          "id": "a67b0425-9d28-4233-af55-dbdeeb136b7b",
+          "title": "2.2 Popular ML Frameworks Comparison",
+          "text": "Framework Language Creator Best For Release Year TensorFlow Python/C++ Google Production deployment 2015 PyTorch Python Meta (Facebook) Research & prototyping 2016 Scikit-learn Python INRIA (France) Classical ML algorithms 2007 Keras Python Francois Chollet Fast prototyping 2015 XGBoost Python/R Tianqi Chen Tabular data / Kaggle 2014 JAX Python Google Brain High-performance research 2018"
+        },
+        {
+          "id": "f9ab46ed-0116-4fd1-9ec8-c189b048caca",
+          "title": "2.3 The Bias-Variance Tradeoff",
+          "text": "One of the most important concepts in ML is the bias-variance tradeoff. Bias is the error from incorrect assumptions in the learning algorithm — high bias causes underfitting. Variance is the error from sensitivity to small fluctuations in the training set — high variance causes overfitting. The goal is to find a balance that minimizes total prediction error. Regularization techniques (L1/Lasso, L2/Ridge) help reduce variance."
+        },
+        {
+          "id": "35c3f3d2-116e-4b15-8b22-b995e40ff6fb",
+          "title": "-- 2 of 8 --",
+          "text": "Chapter 3: Deep Learning & Neural Networks Deep Learning is a subset of machine learning that uses neural networks with many layers (hence 'deep'). Inspired by the human brain, these networks can learn representations of data with multiple levels of abstraction. Deep learning has revolutionized computer vision, natural language processing, and speech recognition."
+        },
+        {
+          "id": "2d28d2e9-0f50-4894-8882-c931590a9607",
+          "title": "3.1 Neural Network Architecture",
+          "text": "A neural network consists of layers of interconnected nodes (neurons). The Input Layer receives raw data (e.g., pixel values of an image). Hidden Layers transform the data through weighted connections and activation functions. The Output Layer produces the final prediction (e.g., class probabilities). Common activation functions: ReLU, Sigmoid, Tanh, Softmax."
+        },
+        {
+          "id": "1f9aff2a-98d4-45ee-bd9c-5b039202512e",
+          "title": "3.2 Types of Neural Networks",
+          "text": "Network Type Abbreviation Primary Use Case Key Feature Convolutional Neural Network CNN Image recognition, Computer vision Spatial feature extraction via filters Recurrent Neural Network RNN Sequential data, Time series Memory of previous inputs Long Short-Term Memory LSTM NLP, Speech recognition Solves vanishing gradient problem Transformer — NLP, Vision, Multimodal Self-attention mechanism Generative Adversarial Network GAN Image/video generation Generator vs Discriminator Variational Autoencoder VAE Data generation, Compression Latent space representation Graph Neural Network GNN Social networks, Molecules Non-Euclidean data structures"
+        },
+        {
+          "id": "ce2bcd7d-8526-45a8-88bf-fffaf57dfaea",
+          "title": "3.3 The Transformer Architecture (2017)",
+          "text": "The Transformer architecture was introduced in the paper 'Attention Is All You Need' by Vaswani et al. in 2017. It replaced recurrent networks with a mechanism called self-attention, allowing the model to weigh the importance of different parts of the input simultaneously. Key components: Multi-Head Attention, Positional Encoding, Feed-Forward Networks, Layer Normalization. The Transformer became the foundation for BERT (2018), GPT-2 (2019), GPT-3 (2020), and GPT-4 (2023)."
+        },
+        {
+          "id": "69e039f9-a3b0-46f5-b294-ca505cb2dab0",
+          "title": "Chapter 4: Large Language Models (LLMs)",
+          "text": "Large Language Models (LLMs) are deep learning models trained on massive text datasets to understand and generate human language. They are based on the Transformer architecture and use a technique called next-token prediction during pre-training. LLMs demonstrate emergent abilities — capabilities not explicitly trained for — that appear as model size increases."
+        },
+        {
+          "id": "e8a4029c-761e-42bb-ae36-91c5387f7bfa",
+          "title": "Model Creator Parameters Release Notable Feature | Row 1",
+          "text": "Model Creator Parameters Release Notable Feature: GPT-4 OpenAI ~1.8 Trillion* March 2023 Multimodal (text+image input)"
+        },
+        {
+          "id": "98d01695-c156-4a68-8b0b-a387064e4605",
+          "title": "Model Creator Parameters Release Notable Feature | Row 2",
+          "text": "Model Creator Parameters Release Notable Feature: Claude 3 Opus Anthropic Undisclosed March 2024 Strong reasoning & safety"
+        },
+        {
+          "id": "81af5893-060d-4255-a2a7-2247f4a87baf",
+          "title": "Model Creator Parameters Release Notable Feature | Row 3",
+          "text": "Model Creator Parameters Release Notable Feature: Gemini Ultra Google DeepMind Undisclosed Dec 2023 Natively multimodal"
+        },
+        {
+          "id": "7ffcfcec-6290-4be9-b796-2feeb2c22f4b",
+          "title": "Model Creator Parameters Release Notable Feature | Row 4",
+          "text": "Model Creator Parameters Release Notable Feature: LLaMA 3 70B Meta 70 Billion April 2024 Open-source, fine-tunable"
+        },
+        {
+          "id": "ce01a56b-15c9-4ecc-8ee1-dc8090041a14",
+          "title": "Model Creator Parameters Release Notable Feature | Row 5",
+          "text": "Model Creator Parameters Release Notable Feature: Mistral Large Mistral AI Undisclosed Feb 2024 European, multilingual Command R+ Cohere 104 Billion April 2024 RAG-optimized model *"
+        },
+        {
+          "id": "3a19df81-80b7-4e41-abd9-48ee1c90d8c1",
+          "title": "Model Creator Parameters Release Notable Feature | Row 6",
+          "text": "Model Creator Parameters Release Notable Feature: GPT-4 parameter count is unconfirmed; this is a widely cited estimate."
+        },
+        {
+          "id": "bffa28e7-6333-4952-8546-ef94258cfc0d",
+          "title": "Model Creator Parameters Release Notable Feature",
+          "text": "GPT-4 OpenAI ~1.8 Trillion* March 2023 Multimodal (text+image input) Claude 3 Opus Anthropic Undisclosed March 2024 Strong reasoning & safety Gemini Ultra Google DeepMind Undisclosed Dec 2023 Natively multimodal LLaMA 3 70B Meta 70 Billion April 2024 Open-source, fine-tunable Mistral Large Mistral AI Undisclosed Feb 2024 European, multilingual Command R+ Cohere 104 Billion April 2024 RAG-optimized model * GPT-4 parameter count is unconfirmed; this is a widely cited estimate."
+        },
+        {
+          "id": "990e3643-0f31-4f51-a97b-f1223902d0f2",
+          "title": "4.2 Retrieval-Augmented Generation (RAG)",
+          "text": "RAG is a technique introduced by Lewis et al. (Meta AI Research) in the paper 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks' (2020). It combines the strengths of retrieval-based and generative models. Instead of relying solely on parametric knowledge stored in model weights, RAG retrieves relevant documents from an external knowledge base and uses them as context during generation."
+        },
+        {
+          "id": "0389ef92-e442-4165-b024-5837bb44ad6c",
+          "title": "RAG Pipeline Steps:",
+          "text": "1. Document Ingestion — Load documents (PDF, Word, Web, Database) 2. Chunking — Split documents into smaller passages (typically 256-512 tokens) 3. Embedding — Convert chunks to dense vector representations using an embedding model 4. Indexing — Store vectors in a vector database (Pinecone, Weaviate, ChromaDB, FAISS) 5. Query Embedding — Convert user query to a vector using the same embedding model 6. Similarity Search — Find top-K most similar chunks using cosine similarity or dot product 7. Context Injection — Insert retrieved chunks into the LLM prompt as context 8. Generation — LLM generates an answer grounded in the retrieved context 9. Response — Final answer is returned to the user (optionally with source citations)"
+        },
+        {
+          "id": "7b1f9ee4-1957-44d9-9b97-ec5f53affd2b",
+          "title": "Chapter 5: Technology Industry Facts",
+          "text": "5.1 Top AI Companies by Valuation (2024) Company HQ Founded Valuation Key AI Product Microsoft Redmond, USA 1975 $3.1 Trillion Azure OpenAI, Copilot Google (Alphabet) Mountain View, USA 1998 $2.1 Trillion Gemini, Google AI OpenAI San Francisco, USA 2015 $80 Billion GPT-4, ChatGPT, DALL-E Anthropic San Francisco, USA 2021 $18 Billion Claude AI (Constitutional AI) Meta AI Menlo Park, USA 2004 $1.3 Trillion LLaMA, Llama 3, Code Llama Nvidia Santa Clara, USA 1993 $2.3 Trillion H100/A100 GPUs, CUDA Infosys Bengaluru, India 1981 $76 Billion Topaz AI Platform TCS Mumbai, India 1968 $168 Billion TCS AI Cloud, WizAI"
+        },
+        {
+          "id": "7e2eac2f-3814-4def-905b-bfd50a937953",
+          "title": "5.2 India's AI & Tech Ecosystem",
+          "text": "India is the world's largest technology talent pool with over 5 million software developers as of 2024. The country is home to major global IT hubs including Bengaluru (called the Silicon Valley of India), Hyderabad (HITEC City), Pune, Chennai, and Noida. India's IT sector contributes approximately 7.5% of GDP and employs over 5.4 million people directly. Key Indian AI startups include: Sarvam AI (multilingual LLM for Indian languages), Krutrim (Ola's AI division, launched Jan 2024), Haptik (conversational AI), Mad Street Den (computer vision for retail), and Staqu Technologies (video analytics)."
+        },
+        {
+          "id": "5a63641c-b1ae-4206-a7f5-1e8989c7744f",
+          "title": "5.3 Indian Languages & AI Challenge",
+          "text": "India has 22 officially recognized languages under the 8th Schedule of the Constitution, and over 19,500 dialects and sub-dialects. The major language families are Indo-Aryan (Hindi, Bengali, Marathi, Gujarati, Punjabi, Rajasthani) and Dravidian (Tamil, Telugu, Kannada, Malayalam). Hindi is spoken by approximately 600 million people, making it the most spoken Indian language. Building multilingual AI for India requires handling diverse scripts: Devanagari, Bengali, Tamil, Telugu, Kannada, Malayalam, Gujarati, Gurmukhi, and Odia."
+        },
+        {
+          "id": "fe06a760-52f7-4726-b639-4c85e9cef004",
+          "title": "-- 5 of 8 --",
+          "text": "Chapter 6: General Science & World Facts"
+        },
+        {
+          "id": "e438bd3c-4e28-42bd-a8c1-c1c6120bcf6f",
+          "title": "6.1 Solar System Data",
+          "text": "Planet Distance from Sun Diameter (km) Moons Orbital Period Mercury 57.9 million km 4,879 0 88 days Venus 108.2 million km 12,104 0 225 days Earth 149.6 million km 12,742 1 (Moon) 365.25 days Mars 227.9 million km 6,779 2 (Phobos, Deimos) 687 days Jupiter 778.5 million km 139,820 95 11.9 years Saturn 1.43 billion km 116,460 146 29.5 years Uranus 2.87 billion km 50,724 28 84 years Neptune 4.5 billion km 49,244 16 165 years"
+        },
+        {
+          "id": "09992dd2-0b24-466f-91cd-58acd530650d",
+          "title": "6.2 Human Body Facts",
+          "text": "The human body contains approximately 37.2 trillion cells. The adult human skeleton has 206 bones. The human brain has about 86 billion neurons and consumes roughly 20% of the body's total energy despite being only 2% of body weight. The heart beats approximately 100,000 times per day, pumping about 7,500 liters of blood. The small intestine, if stretched out, would measure about 6 meters in length. Humans share approximately 98.7% of DNA with chimpanzees and 60% with fruit flies."
+        },
+        {
+          "id": "1e9fb791-51ee-481e-8204-c98dd4a237b6",
+          "title": "Category Record Value / Location",
+          "text": "Tallest mountain Mount Everest 8,848.86 meters (Nepal/China) Deepest ocean point Mariana Trench (Challenger Deep) 10,935 meters (Pacific Ocean) Largest country by area Russia 17.1 million sq km Most populous country (2024) India 1.44 billion people Longest river Nile River (disputed) 6,650 km (Africa) Largest desert Antarctic Desert 14.2 million sq km Hottest recorded temperature Death Valley, USA (1913) 56.7 degrees Celsius Coldest recorded temperature Vostok Station, Antarctica (1983) -89.2 degrees Celsius"
+        },
+        {
+          "id": "75063a55-a585-468e-a3f7-ed6af23f9664",
+          "title": "-- 6 of 8 --",
+          "text": "Chapter 7: Sample Questions to Test Your RAG System Use these questions to evaluate your RAG pipeline. A good RAG system should answer these correctly by retrieving the right chunks from this document. Q1: When was the Dartmouth Conference held and why is it significant? [Expected Answer Hint: 1956 — it established AI as an academic field] Q2: What does RAG stand for and who introduced the concept? [Expected Answer Hint: Retrieval-Augmented Generation; Lewis et al. at Meta AI Research, 2020] Q3: How many parameters does LLaMA 3 70B have?"
+        },
+        {
+          "id": "f481e3bb-1809-471d-a6f4-95f01f1a6bbc",
+          "title": "[Expected Answer Hint: 70 Billion parameters]",
+          "text": "Q4: Which planet has the most moons according to this document? [Expected Answer Hint: Saturn with 146 moons] Q5: What is the Bias-Variance Tradeoff in machine learning? [Expected Answer Hint: Bias = underfitting, Variance = overfitting; goal is to minimize total prediction error] Q6: What percentage of India's GDP does the IT sector contribute? [Expected Answer Hint: Approximately 7.5% of GDP] Q7: What paper introduced the Transformer architecture and in which year? [Expected Answer Hint: 'Attention Is All You Need' by Vaswani et al. in 2017] Q8: Name 3 Indian AI startups mentioned in this document. [Expected Answer Hint: Sarvam AI, Krutrim, Haptik (also Mad Street Den, Staqu)] Q9: What is the deepest point in the ocean and how deep is it? [Expected Answer Hint: Mariana Trench (Challenger Deep) at 10,935 meters] Q10: What is the difference between Narrow AI, General AI, and Super AI? [Expected Answer Hint: ANI = specific task, AGI = general human-level (theoretical), ASI = superhuman"
+        },
+        {
+          "id": "36242b46-0e0e-44c8-aca1-f0015bf6fcbc",
+          "title": "(hypothetical)]",
+          "text": "Q11: When was PyTorch released and who created it? [Expected Answer Hint: 2016 by Meta (Facebook)] Q12: How many officially recognized languages does India have? [Expected Answer Hint: 22 officially recognized languages under the 8th Schedule of the Constitution] Q13: What is Constitutional AI and which company uses it? [Expected Answer Hint: Anthropic uses Constitutional AI for Claude] Q14: How many neurons does the human brain have? [Expected Answer Hint: Approximately 86 billion neurons] Q15: What are the 9 steps in the RAG pipeline as described in this document? [Expected Answer Hint: Document Ingestion, Chunking, Embedding, Indexing, Query Embedding, Similarity"
+        },
+        {
+          "id": "61d5efd1-a87c-4401-9bda-9467d853e312",
+          "title": "Document Information",
+          "text": "Total Pages: 7 | Topics: AI, ML, Deep Learning, LLMs, RAG, Companies, Science, Geography, India Tech Created for RAG pipeline testing. Contains structured tables, factual paragraphs, and diverse content types. This document is intentionally comprehensive to test chunking strategies, retrieval precision, and answer quality."
+        }
+      ]
+    }
+  ],
+  "updatedAt": "2026-05-29T10:44:00.915Z"
+}

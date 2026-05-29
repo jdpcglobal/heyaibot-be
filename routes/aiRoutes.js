@@ -4,10 +4,19 @@ require('dotenv').config();
 const axios = require('axios');
 
 const { getWebsiteDataByApiKey } = require('../models/websiteModel');
+const {
+    retrieveRelevantChunks,
+    formatChunksForPrompt,
+    getSuggestionsFromChunks,
+    isMultiHopQuestion
+} = require('../services/ragService');
+const {
+    applyTypos,
+    classifySupportIntent,
+    isGenericQuestion,
+    buildClarificationPrompt
+} = require('../services/intentService');
 
-/* ─────────────────────────────
-   GEMINI CALL
-──────────────────────────── */
 const gemini = async (prompt) => {
     try {
         const res = await axios.post(
@@ -17,275 +26,159 @@ const gemini = async (prompt) => {
                 generationConfig: { temperature: 0.1 }
             }
         );
+
         return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
     } catch (err) {
         return null;
     }
 };
 
-/* ─────────────────────────────
-   FLATTEN SERVICES
-──────────────────────────── */
-const flattenServices = (data = []) => {
-    const services = [];
-    data.forEach(section => {
-        (section.value || []).forEach(v => {
-            services.push({
-                name: v.name,
-                description: v.description,
-                tags: v.tags || []
-            });
-        });
-    });
-    return services;
+const stripCodeFences = (value = '') =>
+    String(value || '')
+        .replace(/```json/gi, '```')
+        .replace(/```/g, '')
+        .trim();
+
+const parseRagResponse = (ragResult) => {
+    const cleaned = stripCodeFences(ragResult);
+    if (!cleaned) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(cleaned);
+    } catch (error) {
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            try {
+                return JSON.parse(jsonMatch[0]);
+            } catch (nestedError) {
+                return { answer: cleaned };
+            }
+        }
+
+        return { answer: cleaned };
+    }
 };
 
-/* ─────────────────────────────
-   GREETING CHECK
-──────────────────────────── */
 const GREETINGS = [
-    'hi','hello','hey','hii','helo','sup','yo',
-    'good morning','good afternoon','good evening',
-    'namaste','salaam','hola','greetings','howdy'
+    'hi', 'hello', 'hey', 'hii', 'helo', 'sup', 'yo',
+    'good morning', 'good afternoon', 'good evening',
+    'namaste', 'salaam', 'hola', 'greetings', 'howdy'
 ];
+
 const isGreeting = (text) => {
     const clean = text.trim().toLowerCase().replace(/[^a-z ]/g, '').trim();
     return GREETINGS.includes(clean);
 };
 
-/* ─────────────────────────────
-   STEP 1: DIRECT TAG MATCH — No AI
-   Check if question words directly match
-   any service tag or service name
-──────────────────────────── */
-const directMatch = (question, services) => {
-    const q = question.toLowerCase();
-    let bestService = null;
-    let bestScore = 0;
-
-    services.forEach(service => {
-        let score = 0;
-
-        // Check service name words
-        const nameWords = service.name.toLowerCase().split(' ');
-        nameWords.forEach(word => {
-            if (word.length > 2 && q.includes(word)) score += 3;
-        });
-
-        // Check tags
-        service.tags.forEach(tag => {
-            const tagLower = tag.toLowerCase();
-            if (q.includes(tagLower)) score += 2;
-            // partial word match
-            tagLower.split(' ').forEach(word => {
-                if (word.length > 3 && q.includes(word)) score += 1;
-            });
-        });
-
-        if (score > bestScore) {
-            bestScore = score;
-            bestService = service;
-        }
-    });
-
-    return bestScore >= 2 ? bestService : null;
-};
-
-/* ─────────────────────────────
-   STEP 2: AI DEEP MATCH
-   Only called when direct match fails
-──────────────────────────── */
-const aiMatch = async (question, services, customPrompt, categories) => {
-
-    const serviceList = services.map((s, i) =>
-`[${i}] Name: ${s.name}
-Tags: ${s.tags.join(", ")}
-Desc: ${s.description}`
-    ).join("\n\n");
-
-    const menuList = customPrompt.map((p, i) => `[${i}] ${p}`).join("\n");
-
-    const res = await gemini(`
-Business: ${categories.join(", ")}
-User question: "${question}"
-
-Services:
-${serviceList}
-
-Menu:
-${menuList}
-
-Task: Match user question to best service.
-Think about what user truly wants — go beyond literal words.
-
-relevant=false ONLY for: food, body health, weather, sports, music, movies, travel, pets, personal topics.
-
-Return ONLY this JSON:
-{"relevant": true, "serviceIndex": 0, "menuIndex": 0, "intent": "short intent"}
-
-No match: {"relevant": true, "serviceIndex": -1, "menuIndex": -1, "intent": "short intent"}
-Not relevant: {"relevant": false, "serviceIndex": -1, "menuIndex": -1, "intent": "out of scope"}
-`);
-
-    try {
-        const clean = res?.replace(/```json|```/g, '').trim();
-        const parsed = JSON.parse(clean);
-        return {
-            relevant: parsed.relevant === true,
-            serviceIndex: typeof parsed.serviceIndex === 'number' ? parsed.serviceIndex : -1,
-            menuIndex: typeof parsed.menuIndex === 'number' ? parsed.menuIndex : -1,
-            intent: parsed.intent || question
-        };
-    } catch {
-        return { relevant: true, serviceIndex: -1, menuIndex: -1, intent: question };
-    }
-};
-
-/* ─────────────────────────────
-   BEST MENU SUGGESTION — No AI
-   Find customPrompt closest to service name
-──────────────────────────── */
-const getBestMenu = (serviceName, customPrompt) => {
-    if (!serviceName || !customPrompt.length) return -1;
-
-    const serviceWords = serviceName.toLowerCase().split(' ');
-
-    let bestIndex = -1;
-    let bestScore = 0;
-
-    customPrompt.forEach((p, i) => {
-        const pLower = p.toLowerCase();
-        let score = 0;
-        serviceWords.forEach(word => {
-            if (word.length > 2 && pLower.includes(word)) score++;
-        });
-        if (score > bestScore) {
-            bestScore = score;
-            bestIndex = i;
-        }
-    });
-
-    return bestScore > 0 ? bestIndex : -1;
-};
-
-/* ─────────────────────────────
-   INTRO LINE
-──────────────────────────── */
 const getIntro = async (question) => {
     return await gemini(
         `User asked: "${question}"\nWrite 1 short friendly professional reply. Max 10 words. Return only the line.`
     ) || "Sure, I can help you with that.";
 };
 
-/* ─────────────────────────────
-   SUGGESTIONS
-   Match → 1 best | No match → all
-──────────────────────────── */
-const getSuggestions = (customPrompt, menuIndex) => {
-    if (!customPrompt.length) return [];
-    if (menuIndex >= 0 && menuIndex < customPrompt.length) {
-        return [customPrompt[menuIndex]];
-    }
-    return customPrompt;
-};
-
-/* ─────────────────────────────
-   MAIN API
-──────────────────────────── */
 router.post('/generate-ai-response', async (req, res) => {
     try {
         const { question, apiKey } = req.body;
 
         if (!question || !apiKey) {
-            return res.json({ success: false, message: "question and apiKey required" });
+            return res.json({ success: false, message: 'question and apiKey required' });
         }
 
         const website = await getWebsiteDataByApiKey(apiKey);
         if (!website.success) {
-            return res.json({ success: false, message: "Invalid apiKey" });
+            return res.json({ success: false, message: 'Invalid apiKey' });
         }
 
         const data = website.data;
-        const services = flattenServices(data.aifuture);
 
-        /* ── GREETING ── */
         if (isGreeting(question)) {
             return res.json({
                 success: true,
-                intent: "greeting",
-                response: data.systemPrompt?.[0] || "Hello! How can I help you today?",
+                intent: 'greeting',
+                response: data.systemPrompt?.[0] || 'Hello! How can I help you today?',
                 suggestions: data.customPrompt
             });
         }
 
-        /* ── STEP 1: DIRECT TAG/NAME MATCH — No AI, instant ── */
-        let service = directMatch(question, services);
-        let intent = question;
-        let menuIndex = -1;
+        const normalizedQuestion = applyTypos(question);
+        const multiHop = isMultiHopQuestion(question);
+        const retrieval = retrieveRelevantChunks(normalizedQuestion, data, {
+            limit: multiHop ? 4 : 3,
+            scoreThreshold: multiHop ? 0.6 : 0.75,
+            multiHop,
+        });
+        const detectedIntent = classifySupportIntent(question, retrieval.chunks, data);
+        const suggestions = getSuggestionsFromChunks(retrieval.chunks, data.customPrompt);
 
-        if (service) {
-            menuIndex = getBestMenu(service.name, data.customPrompt);
-        }
+        const shouldClarify =
+            isGenericQuestion(question) ||
+            detectedIntent.needsClarification &&
+            !retrieval.hasStrongMatch &&
+            !retrieval.hasClearWinner;
 
-        /* ── STEP 2: AI DEEP MATCH — only if direct match failed ── */
-        if (!service) {
-            const analysis = await aiMatch(question, services, data.customPrompt, data.category);
-            intent = analysis.intent;
-
-            if (!analysis.relevant) {
-                const msg = await gemini(`
-User asked: "${question}"
-Our services: ${data.category.join(", ")}
-Write 2 lines:
-Line 1: "We regret this is outside our area of expertise."
-Line 2: Ask one short question using: ${data.category.join(", ")}
-`);
-                return res.json({
-                    success: true,
-                    intent: "out_of_scope",
-                    response: msg || `We regret this is outside our expertise. Are you looking for ${data.category.join(" or ")}?`,
-                    suggestions: data.customPrompt
-                });
-            }
-
-            if (analysis.serviceIndex >= 0 && analysis.serviceIndex < services.length) {
-                service = services[analysis.serviceIndex];
-                menuIndex = analysis.menuIndex >= 0 ? analysis.menuIndex : getBestMenu(service.name, data.customPrompt);
-            }
-        }
-
-        /* ── SERVICE FOUND ── */
-        if (service) {
-            const introText = await getIntro(question);
-            const suggestions = getSuggestions(data.customPrompt, menuIndex);
-
+        if (shouldClarify) {
             return res.json({
                 success: true,
-                intent,
-                response: `${introText}\n\n${service.name}\n${service.description}\n\nWould you like a free quote or more details?`,
-                suggestions
+                intent: 'clarification_needed',
+                selectedArea: detectedIntent.areaLabel,
+                normalizedQuestion,
+                response: buildClarificationPrompt(detectedIntent, data.customPrompt),
+                suggestions: suggestions.length ? suggestions : data.customPrompt
             });
         }
 
-        /* ── NO MATCH ── */
-        const msg = await gemini(`
-User asked: "${question}"
-Our services: ${data.category.join(", ")}
-Write 2 lines:
-Line 1: "We apologize, we could not find an exact match for your query."
-Line 2: Ask one short specific question using: ${data.category.join(", ")}
-`);
+        const promptContext = formatChunksForPrompt(retrieval.chunks);
+        const ragPrompt = `
+You are answering as a business website assistant.
+Use only the retrieved business context below.
+If the context is partial, be honest and keep the answer grounded in it.
+Do not invent services, prices, policies, or PDF details that are not in the context.
+Always reply in clear English, even if the user writes in Hindi or Hinglish.
+Do not copy long lines from the source word-for-word. Rewrite the answer in a clear, natural, customer-friendly way.
+If there are multiple useful points, use short bullets.
+Keep the answer friendly and concise.
+Prefer the single strongest matching fact instead of combining weak matches.
+Do not ask the user to choose between sections when the context already contains a likely answer.
+If one chunk is clearly the best match, answer from that chunk directly.
+If the question needs multiple facts, combine only the retrieved facts that directly support the answer.
+For list or multi-step questions, preserve all key items from the retrieved context.
+
+User question: "${question}"
+Normalized question: "${normalizedQuestion}"
+Business categories: ${(data.category || []).join(', ')}
+Detected support area: ${detectedIntent.areaLabel}
+Detected intent key: ${detectedIntent.intent}
+Question type: ${multiHop ? 'multi-hop' : 'single-hop'}
+
+Retrieved context:
+${promptContext}
+
+Return ONLY this JSON:
+{"intent":"short intent","selectedArea":"best matching support area","answer":"final customer-facing answer"}
+`;
+
+        const ragResult = await gemini(ragPrompt);
+        const parsed = parseRagResponse(ragResult);
+
+        const topServiceChunk = retrieval.chunks.find((chunk) => chunk.type === 'service');
+        const introText = await getIntro(question);
+        const fallbackAnswer = topServiceChunk
+            ? `${introText}\n\n${topServiceChunk.title}\n${topServiceChunk.text.replace(/^Section:.*?\|\s*/i, '')}\n\nWould you like more details or a quote?`
+            : `${introText}\n\nBased on what I found, ${retrieval.chunks[0].text}`;
 
         return res.json({
             success: true,
-            intent,
-            response: msg || `We apologize, we could not find an exact match. Are you looking for ${data.category.join(" or ")}?`,
-            suggestions: data.customPrompt
+            intent: parsed?.intent || detectedIntent.intent || 'retrieval_answer',
+            selectedArea: parsed?.selectedArea || detectedIntent.areaLabel,
+            normalizedQuestion,
+            response: parsed?.answer || fallbackAnswer,
+            suggestions
         });
-
     } catch (err) {
         console.error(err);
-        res.json({ success: false, message: "Server error" });
+        res.json({ success: false, message: 'Server error' });
     }
 });
 

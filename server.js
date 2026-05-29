@@ -8,25 +8,7 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const path = require("path");
 require("dotenv").config();
-
-
-
-
-// ---------------------------
-
-//  Import Routes
-// ---------------------------
-const childPromptRoutes = require("./routes/promptsRoutes");
-const websiteRoutes = require("./routes/websiteRoutes");
-const chatRoutes = require("./routes/chatRoutes");
-const codeConfigRoutes = require("./routes/codeConfigRoutes");
-const aiRoutes = require("./routes/aiRoutes");
-const executeUrlsRoutes = require("./routes/executeUrls.routes");
-const chatmessageRoutes = require('./routes/chatmessageRoutes');
-const brandingRoutes = require('./routes/brandingRoutes');
-const analyticsRoutes = require('./routes/analyticsRoutes');
-const tokenDetailsRoutes = require('./routes/tokenDetailsRoutes');
-const aiChatRoutes = require('./routes/aichatRoutes');
+const localChatRoutes = require("./routes/localChatRoutes");
 // ---------------------------
 //  Initialize App
 // ---------------------------
@@ -57,21 +39,8 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ---------------------------
-//  API Routes
-// ---------------------------
-// app.use('/auth', auth)
-app.use('/api', aiChatRoutes);
-app.use('/api', tokenDetailsRoutes);
-app.use('/analytics', analyticsRoutes);
-app.use('/api', chatmessageRoutes);
-app.use('/api', aiRoutes);
-app.use("/api/childprompt", childPromptRoutes);
-app.use("/api/websites", websiteRoutes);
-app.use("/api", chatRoutes);
-app.use("/api", executeUrlsRoutes);
-app.use("/code-config", codeConfigRoutes);
-app.use('/api', brandingRoutes);
+app.use('/api/local', localChatRoutes);
+app.use('/', localChatRoutes);
 // ---------------------------
 //  Health Check Route
 // ---------------------------
@@ -95,15 +64,14 @@ app.get("/api/docs", (req, res) => {
     message: "API Documentation",
     endpoints: {
       websites: {
-        "GET /api/websites": "Get all websites or specific website by API key",
-        "GET /api/websites/:id": "Get website by ID",
-        "GET /api/websites/by-api-key/key": "Get website by API key",
-        "POST /api/websites": "Create new website",
-        "PUT /api/websites/:id": "Update website by ID",
-        "PATCH /api/websites/:id/custom-data": "Update custom data by ID",
-        "PATCH /api/websites/:id/status": "Update status by ID",
-        "DELETE /api/websites/:id": "Delete website by ID",
-        "POST /api/websites/sync": "Sync websites from external API"
+        "POST /pdf-upload": "Upload one PDF and save extracted text locally",
+        "GET /knowledge": "Get the currently stored local PDF knowledge",
+        "DELETE /knowledge": "Clear the locally stored PDF knowledge",
+        "POST /chat": "Ask a question against the locally stored PDF knowledge",
+        "POST /api/local/pdf-upload": "Upload one PDF and save extracted text locally",
+        "GET /api/local/knowledge": "Get the currently stored local PDF knowledge",
+        "DELETE /api/local/knowledge": "Clear the locally stored PDF knowledge",
+        "POST /api/local/chat": "Ask a question against the locally stored PDF knowledge"
       }
     }
   });

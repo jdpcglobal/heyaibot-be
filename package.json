@@ -25,6 +25,7 @@
     "multer": "^2.0.2",
     "next-auth": "^4.24.13",
     "node-fetch": "^2.7.0",
+    "pdf-parse": "^2.4.5",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

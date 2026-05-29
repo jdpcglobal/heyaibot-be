@@ -1,11 +1,18 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const websiteController = require('../controllers/websiteController');
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 // ================= API KEY BASED (ALWAYS FIRST) =================
 router.get('/client-config', websiteController.getClientWebsiteConfig);
 router.get('/header', websiteController.getWebsitesHeader);
 router.get('/chat-config', websiteController.getChatConfig);
+router.get('/pdf-documents', websiteController.getPdfDocumentsByApiKey);
+router.post('/pdf-upload-by-api-key', upload.single('pdf'), websiteController.uploadPdfByApiKey);
 
 // ================= WEBSITE LEVEL DESCRIPTION & TAGS =================
 // Search websites by description
@@ -15,6 +22,7 @@ router.get('/tags/:tag', websiteController.getWebsitesByTag);
 // Add/remove tags to website
 router.post('/:id/tags', websiteController.addTagToWebsite);
 router.delete('/:id/tags', websiteController.removeTagFromWebsite);
+router.post('/:id/pdf-upload', upload.single('pdf'), websiteController.uploadPdfToWebsite);
 
 // ================= SERVICE OPERATIONS (AIFUTURE) =================
 // Service description and tags management
@@ -67,6 +75,14 @@ router.get('/user/:userId/websites', websiteController.getAllWebsitesByUserId);
 // GET / UPDATE specific website for user
 router.get('/user/:userId/websites/:id', websiteController.getWebsiteByIdAndUserId);
 router.put('/user/:userId/websites/:id', websiteController.updateWebsiteByUserId);
+router.post('/user/:userId/websites/:id/pdf-upload', upload.single('pdf'), async (req, res) => {
+  const { id, userId } = req.params;
+  const ownershipResult = await require('../models/websiteModel').getWebsiteByIdAndUserId(id, userId);
+  if (!ownershipResult.success) {
+    return res.status(403).json({ success: false, error: 'Not authorized' });
+  }
+  return websiteController.uploadPdfToWebsite(req, res);
+});
 
 // ── ADMIN SOFT DELETE ──
 // Ye route admin ke liye hai — sirf adminDeleted=true flag lagta hai
