@@ -1,55 +1,4 @@
 const websiteModel = require('../models/websiteModel');
-const { parsePdfBuffer } = require('../services/pdfService');
-const {
-  generatePdfMetadata,
-  mergePdfMetadata,
-  attachMetadataToDocument,
-  toArray,
-} = require('../services/pdfMetadataService');
-
-const buildClientWebsiteItem = (website = {}) => ({
-  id: website.id,
-  userId: website.userId || null,
-  websiteName: website.websiteName || '',
-  websiteUrl: website.websiteUrl || '',
-  description: website.description || '',
-  tags: website.tags || [],
-  systemPrompt: website.systemPrompt || [],
-  customPrompt: website.customPrompt || [],
-  category: website.category || [],
-  aifuture: website.aifuture || [],
-  pdfDocuments: website.pdfDocuments || [],
-  role: website.role || [],
-  apiKey: website.apiKey || '',
-  status: website.status || 'active',
-  adminDeleted: Boolean(website.adminDeleted),
-  createdAt: website.createdAt || null,
-  updatedAt: website.updatedAt || null,
-});
-
-const buildPdfUploadWebsiteItem = (website = {}) => ({
-  id: website.id,
-  websiteName: website.websiteName || '',
-  description: website.description || '',
-  tags: website.tags || [],
-  systemPrompt: website.systemPrompt || [],
-  customPrompt: website.customPrompt || [],
-  category: website.category || [],
-  aifuture: website.aifuture || [],
-  role: website.role || [],
-});
-
-const buildPdfUploadMetadata = (body = {}) => ({
-  title: body.title || '',
-  category: toArray(body.category),
-  websiteName: body.websiteName || '',
-  systemPrompt: toArray(body.systemPrompt),
-  description: body.description || '',
-  tags: toArray(body.tags),
-  customPrompt: toArray(body.customPrompt),
-  aifuture: Array.isArray(body.aifuture) ? body.aifuture : [],
-  role: toArray(body.role),
-});
 
 // ── CREATE ──
 exports.createWebsite = async (req, res) => {
@@ -167,7 +116,7 @@ exports.getChatConfig = async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: 'Missing apiKey' });
   const result = await websiteModel.getWebsiteByApiKey(apiKey);
   if (!result.success) return res.status(404).json(result);
-  return res.status(200).json({ success: true, item: { systemPrompt: result.item.systemPrompt, customPrompt: result.item.customPrompt, category: result.item.category, aifuture: result.item.aifuture, pdfDocuments: result.item.pdfDocuments || [] } });
+  return res.status(200).json({ success: true, item: { systemPrompt: result.item.systemPrompt, customPrompt: result.item.customPrompt, category: result.item.category, aifuture: result.item.aifuture } });
 };
 
 exports.getClientWebsiteConfig = async (req, res) => {
@@ -176,95 +125,11 @@ exports.getClientWebsiteConfig = async (req, res) => {
   try {
     const result = await websiteModel.getWebsiteByApiKey(apiKey);
     if (!result.success || !result.item) return res.status(404).json({ success: false, error: 'Website not found' });
-    return res.status(200).json({ success: true, item: buildClientWebsiteItem(result.item) });
+    const website = result.item;
+    return res.status(200).json({ success: true, item: { id: website.id, userId: website.userId || null, websiteName: website.websiteName, status: website.status, systemPrompt: website.systemPrompt || [], customPrompt: website.customPrompt || [], category: website.category || [], aifuture: website.aifuture || [] } });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Server error' });
   }
-};
-
-exports.uploadPdfToWebsite = async (req, res) => {
-  const { id } = req.params;
-
-  if (!req.file) {
-    return res.status(400).json({ success: false, error: 'PDF file is required' });
-  }
-
-  try {
-    const parsedDocument = await parsePdfBuffer(req.file.buffer, req.file.originalname);
-    const generatedMetadata = await generatePdfMetadata(parsedDocument);
-    const mergedMetadata = mergePdfMetadata(generatedMetadata, buildPdfUploadMetadata(req.body));
-    const enrichedDocument = attachMetadataToDocument(parsedDocument, {
-      ...mergedMetadata,
-      chunkMetadata: generatedMetadata.chunkMetadata,
-    });
-    const result = await websiteModel.addPdfDocumentToWebsite(id, enrichedDocument, mergedMetadata);
-
-    if (!result.success) {
-      return res.status(400).json(result);
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: result.message,
-      document: result.document,
-      item: buildPdfUploadWebsiteItem(result.item),
-      metadata: mergedMetadata,
-      pdfDocuments: result.item.pdfDocuments || [],
-    });
-  } catch (error) {
-    return res.status(400).json({ success: false, error: error.message });
-  }
-};
-
-exports.uploadPdfByApiKey = async (req, res) => {
-  const apiKey = req.body.apiKey || req.query.apiKey || req.headers['x-api-key'];
-
-  if (!apiKey) {
-    return res.status(400).json({ success: false, error: 'Missing apiKey' });
-  }
-
-  if (!req.file) {
-    return res.status(400).json({ success: false, error: 'PDF file is required' });
-  }
-
-  try {
-    const parsedDocument = await parsePdfBuffer(req.file.buffer, req.file.originalname);
-    const generatedMetadata = await generatePdfMetadata(parsedDocument);
-    const mergedMetadata = mergePdfMetadata(generatedMetadata, buildPdfUploadMetadata(req.body));
-    const enrichedDocument = attachMetadataToDocument(parsedDocument, {
-      ...mergedMetadata,
-      chunkMetadata: generatedMetadata.chunkMetadata,
-    });
-    const result = await websiteModel.addPdfDocumentByApiKey(apiKey, enrichedDocument, mergedMetadata);
-
-    if (!result.success) {
-      return res.status(400).json(result);
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: result.message,
-      document: result.document,
-      item: buildPdfUploadWebsiteItem(result.item),
-      metadata: mergedMetadata,
-      pdfDocuments: result.item.pdfDocuments || [],
-      websiteId: result.item.id,
-      websiteName: result.item.websiteName || '',
-    });
-  } catch (error) {
-    return res.status(400).json({ success: false, error: error.message });
-  }
-};
-
-exports.getPdfDocumentsByApiKey = async (req, res) => {
-  const apiKey = req.query.apiKey || req.headers['x-api-key'];
-
-  if (!apiKey) {
-    return res.status(400).json({ success: false, error: 'Missing apiKey' });
-  }
-
-  const result = await websiteModel.getPdfDocumentsByApiKey(apiKey);
-  return res.status(result.success ? 200 : 404).json(result);
 };
 
 // ── AIFUTURE SERVICE OPERATIONS ──

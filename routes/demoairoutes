@@ -262,7 +262,7 @@ Line 2: Ask one short question using: ${data.category.join(", ")}
             return res.json({
                 success: true,
                 intent,
-                response: `${introText}\n\n${service.name}\n${service.description}\n\nWould you like a free quote or more details?`,
+                response: `${introText}\n\n${service.description}\n\nWould you like a free quote or more details?`,
                 suggestions
             });
         }
