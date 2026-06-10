@@ -12,19 +12,25 @@ require('dotenv').config();
    GEMINI CALL (same pattern as aiRoutes.js)
 ──────────────────────────── */
 const gemini = async (prompt) => {
-    try {
-        const res = await axios.post(
-            `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
-            {
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
-            }
-        );
-        return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-    } catch (err) {
-        console.error('Gemini error:', err?.response?.data || err.message);
-        return null;
+    if (!process.env.GEMINI_API_URL || !process.env.GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_URL or GEMINI_API_KEY environment variable is not set on the server.');
     }
+    const res = await axios.post(
+        `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
+        {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+        }
+    );
+    const candidate = res.data?.candidates?.[0];
+    if (!candidate) {
+        const blockReason = res.data?.promptFeedback?.blockReason;
+        throw new Error(blockReason ? `Blocked by safety filter: ${blockReason}` : 'No candidates in Gemini response');
+    }
+    if (!candidate.content) {
+        throw new Error(`Gemini stopped: ${candidate.finishReason || 'unknown reason'}`);
+    }
+    return candidate.content.parts?.[0]?.text?.trim() || null;
 };
 
 /* ─────────────────────────────
@@ -107,10 +113,17 @@ Output format:
 Content to analyze:
 ${rawText}`;
 
-        const aiResponse = await gemini(prompt);
+        let aiResponse;
+        try {
+            aiResponse = await gemini(prompt);
+        } catch (geminiErr) {
+            const detail = geminiErr?.response?.data?.error?.message || geminiErr.message;
+            console.error('❌ Gemini call failed:', detail);
+            return res.status(500).json({ success: false, error: `AI error: ${detail}` });
+        }
 
         if (!aiResponse) {
-            return res.status(500).json({ success: false, error: 'AI did not return a response. Please try again.' });
+            return res.status(500).json({ success: false, error: 'AI returned an empty response. Please try again.' });
         }
 
         // Strip accidental markdown fences
