@@ -84,17 +84,28 @@ router.post('/extract-knowledge', async (req, res) => {
             return res.status(400).json({ success: false, error: 'Not enough content extracted to categorize.' });
         }
 
-        // ── 2. Gemini categorization ─────────────────────────────────────────
-        const prompt = `You are a knowledge-base organizer. Analyze the following content and extract structured categories with topics.
+        // ── 2. Gemini categorization + action extraction ─────────────────────
+        const prompt = `You are a chatbot knowledge-base organizer. Analyze the following content and extract two things:
 
-Rules:
-- Identify 2–8 broad CATEGORIES (e.g. "Services", "Products", "Pricing", "About Us", "FAQ", "Contact")
-- Under each category, list 1–8 specific TOPICS
-- Each topic needs: name (short, 2–5 words), description (80–200 chars explaining what it's about), tags (3–6 comma-separated keywords)
+1. KNOWLEDGE BASE CATEGORIES with topics
+2. CHATBOT ACTION BUTTONS with child options for lead capture
+
+━━━ Rules for CATEGORIES ━━━
+- Identify 2–8 broad categories (e.g. "Services", "Products", "Pricing", "About Us", "FAQ")
+- Under each category, list 1–8 specific topics
+- Each topic needs: name (short 2–5 words), description (80–200 chars about what it covers), tags (3–6 keywords)
 - Only include information actually present in the content
-- Output ONLY valid JSON, no explanation, no markdown code fences
 
-Output format:
+━━━ Rules for ACTIONS (chatbot buttons) ━━━
+- Identify 3–7 action buttons relevant to this business
+- These are the BUTTONS shown in the chat widget that users can tap to start a conversation
+- Include at least 1–2 specifically for capturing leads (e.g. "Get a Free Quote", "Book a Consultation", "Request Demo")
+- For each action button, suggest 2–4 child options (sub-buttons or follow-up prompts the user taps next)
+- Children should be SHORT, conversational, tap-friendly (e.g. "Call me back", "Send me pricing", "Book online")
+- Infer the business type intelligently from the content
+
+━━━ Output Format ━━━
+Output ONLY valid JSON, no explanation, no markdown code fences:
 {
   "categories": [
     {
@@ -105,6 +116,23 @@ Output format:
           "description": "Clear description of what this topic covers and who it's for.",
           "tags": ["tag1", "tag2", "tag3"]
         }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "text": "Get a Free Quote",
+      "children": [
+        { "text": "Send me pricing", "children": [] },
+        { "text": "Schedule a call", "children": [] },
+        { "text": "Email me details", "children": [] }
+      ]
+    },
+    {
+      "text": "Contact Us",
+      "children": [
+        { "text": "Call me back", "children": [] },
+        { "text": "Send a message", "children": [] }
       ]
     }
   ]
@@ -144,7 +172,11 @@ ${rawText}`;
             return res.status(500).json({ success: false, error: 'Unexpected AI response structure.', raw: aiResponse });
         }
 
-        return res.status(200).json({ success: true, categories: parsed.categories });
+        return res.status(200).json({
+            success: true,
+            categories: parsed.categories,
+            actions: Array.isArray(parsed.actions) ? parsed.actions : []
+        });
 
     } catch (err) {
         console.error('❌ extract-knowledge error:', err);
