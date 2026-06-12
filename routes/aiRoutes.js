@@ -14,7 +14,7 @@ const gemini = async (prompt) => {
             `${process.env.GEMINI_API_URL}?key=${process.env.GEMINI_API_KEY}`,
             {
                 contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0.1 }
+                generationConfig: { temperature: 0.2 }
             }
         );
         return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
@@ -31,6 +31,7 @@ const flattenServices = (data = []) => {
     data.forEach(section => {
         (section.value || []).forEach(v => {
             services.push({
+                category: section.title || '',
                 name: v.name,
                 description: v.description,
                 tags: v.tags || []
@@ -54,9 +55,7 @@ const isGreeting = (text) => {
 };
 
 /* ─────────────────────────────
-   STEP 1: DIRECT TAG MATCH — No AI
-   Check if question words directly match
-   any service tag or service name
+   STEP 1: DIRECT TAG MATCH — No AI, instant
 ──────────────────────────── */
 const directMatch = (question, services) => {
     const q = question.toLowerCase();
@@ -66,20 +65,23 @@ const directMatch = (question, services) => {
     services.forEach(service => {
         let score = 0;
 
-        // Check service name words
-        const nameWords = service.name.toLowerCase().split(' ');
-        nameWords.forEach(word => {
+        // Name words
+        service.name.toLowerCase().split(' ').forEach(word => {
             if (word.length > 2 && q.includes(word)) score += 3;
         });
 
-        // Check tags
+        // Tags
         service.tags.forEach(tag => {
             const tagLower = tag.toLowerCase();
             if (q.includes(tagLower)) score += 2;
-            // partial word match
             tagLower.split(' ').forEach(word => {
                 if (word.length > 3 && q.includes(word)) score += 1;
             });
+        });
+
+        // Description keywords (light — just nouns longer than 5 chars)
+        service.description.toLowerCase().split(/\W+/).forEach(word => {
+            if (word.length > 5 && q.includes(word)) score += 1;
         });
 
         if (score > bestScore) {
@@ -93,99 +95,136 @@ const directMatch = (question, services) => {
 
 /* ─────────────────────────────
    STEP 2: AI DEEP MATCH
-   Only called when direct match fails
+   Semantic matching — only called when direct fails
 ──────────────────────────── */
-const aiMatch = async (question, services, customPrompt, categories) => {
+const aiMatch = async (question, services, categories) => {
+    if (!services.length) return { relevant: true, serviceIndex: -1, intent: question };
 
     const serviceList = services.map((s, i) =>
 `[${i}] Name: ${s.name}
-Tags: ${s.tags.join(", ")}
-Desc: ${s.description}`
-    ).join("\n\n");
-
-    const menuList = customPrompt.map((p, i) => `[${i}] ${p}`).join("\n");
+Category: ${s.category}
+Tags: ${s.tags.join(', ')}
+Description: ${s.description}`
+    ).join('\n\n');
 
     const res = await gemini(`
-Business: ${categories.join(", ")}
+You are matching a user's question to the most relevant service from a knowledge base.
+
+Business domain: ${categories.join(', ')}
+
 User question: "${question}"
 
-Services:
+Available services:
 ${serviceList}
 
-Menu:
-${menuList}
+Instructions:
+- Think about what the user TRULY wants, beyond literal word matching
+- Consider synonyms, related concepts, and intent
+- A question is "relevant" if it relates to this business in ANY way
+- Only mark "relevant: false" if the question is completely unrelated to this business (e.g. asking about cooking recipes when the business is IT consulting)
+- If multiple services partially match, pick the BEST one — do not return -1 just because it's not a perfect match
+- When uncertain, pick the closest service rather than returning no match
 
-Task: Match user question to best service.
-Think about what user truly wants — go beyond literal words.
+Return ONLY valid JSON (no markdown):
+{"relevant": true, "serviceIndex": 0, "intent": "what the user wants"}
 
-relevant=false ONLY for: food, body health, weather, sports, music, movies, travel, pets, personal topics.
-
-Return ONLY this JSON:
-{"relevant": true, "serviceIndex": 0, "menuIndex": 0, "intent": "short intent"}
-
-No match: {"relevant": true, "serviceIndex": -1, "menuIndex": -1, "intent": "short intent"}
-Not relevant: {"relevant": false, "serviceIndex": -1, "menuIndex": -1, "intent": "out of scope"}
+No match found: {"relevant": true, "serviceIndex": -1, "intent": "what the user wants"}
+Truly off-topic: {"relevant": false, "serviceIndex": -1, "intent": "out of scope"}
 `);
 
     try {
         const clean = res?.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(clean);
         return {
-            relevant: parsed.relevant === true,
+            relevant: parsed.relevant !== false,
             serviceIndex: typeof parsed.serviceIndex === 'number' ? parsed.serviceIndex : -1,
-            menuIndex: typeof parsed.menuIndex === 'number' ? parsed.menuIndex : -1,
             intent: parsed.intent || question
         };
     } catch {
-        return { relevant: true, serviceIndex: -1, menuIndex: -1, intent: question };
+        return { relevant: true, serviceIndex: -1, intent: question };
     }
 };
 
 /* ─────────────────────────────
-   BEST MENU SUGGESTION — No AI
-   Find customPrompt closest to service name
+   CONTEXTUAL ANSWER
+   When a service IS matched — generate a tailored reply
+   instead of dumping raw description
+──────────────────────────── */
+const generateContextualAnswer = async (question, service, businessCategories) => {
+    return await gemini(`
+You are a helpful assistant for a business in: ${businessCategories.join(', ')}
+
+User asked: "${question}"
+
+Most relevant topic from our knowledge base:
+Name: ${service.name}
+Category: ${service.category}
+Description: ${service.description}
+Tags: ${service.tags.join(', ')}
+
+Write a helpful, conversational reply (2–3 sentences) that:
+- Directly answers what the user asked using information from the topic
+- Sounds natural — not like reading from a database
+- Ends with one short follow-up offer (e.g. "Would you like more details?" or "Want a free quote?")
+
+Return only the reply text, no labels or formatting.
+`);
+};
+
+/* ─────────────────────────────
+   KNOWLEDGE FALLBACK
+   When no service matches but topic is relevant —
+   answer using the full KB instead of saying "I don't know"
+──────────────────────────── */
+const generateKnowledgeFallback = async (question, services, categories) => {
+    const kb = services
+        .map(s => `• ${s.name} (${s.category}): ${s.description}`)
+        .join('\n');
+
+    return await gemini(`
+You are a helpful assistant for a business in: ${categories.join(', ')}
+
+User asked: "${question}"
+
+Our full knowledge base:
+${kb}
+
+The user's question didn't match a specific topic exactly. Write a helpful reply that:
+- Uses whatever is most relevant from the knowledge base to partially answer
+- If a related topic exists, mention it by name
+- If nothing is directly relevant, acknowledge kindly and mention 1–2 topics you CAN help with
+- Never say "I don't know" or "outside our scope" — always offer something useful
+- Max 3 sentences, conversational tone
+
+Return only the reply text.
+`);
+};
+
+/* ─────────────────────────────
+   BEST MENU SUGGESTION
 ──────────────────────────── */
 const getBestMenu = (serviceName, customPrompt) => {
     if (!serviceName || !customPrompt.length) return -1;
-
     const serviceWords = serviceName.toLowerCase().split(' ');
-
     let bestIndex = -1;
     let bestScore = 0;
-
     customPrompt.forEach((p, i) => {
         const pLower = p.toLowerCase();
         let score = 0;
         serviceWords.forEach(word => {
             if (word.length > 2 && pLower.includes(word)) score++;
         });
-        if (score > bestScore) {
-            bestScore = score;
-            bestIndex = i;
-        }
+        if (score > bestScore) { bestScore = score; bestIndex = i; }
     });
-
     return bestScore > 0 ? bestIndex : -1;
 };
 
 /* ─────────────────────────────
-   INTRO LINE
-──────────────────────────── */
-const getIntro = async (question) => {
-    return await gemini(
-        `User asked: "${question}"\nWrite 1 short friendly professional reply. Max 10 words. Return only the line.`
-    ) || "Sure, I can help you with that.";
-};
-
-/* ─────────────────────────────
    SUGGESTIONS
-   Match → 1 best | No match → all
 ──────────────────────────── */
 const getSuggestions = (customPrompt, menuIndex) => {
     if (!customPrompt.length) return [];
-    if (menuIndex >= 0 && menuIndex < customPrompt.length) {
-        return [customPrompt[menuIndex]];
-    }
+    if (menuIndex >= 0 && menuIndex < customPrompt.length) return [customPrompt[menuIndex]];
     return customPrompt;
 };
 
@@ -218,7 +257,7 @@ router.post('/generate-ai-response', async (req, res) => {
             });
         }
 
-        /* ── STEP 1: DIRECT TAG/NAME MATCH — No AI, instant ── */
+        /* ── STEP 1: DIRECT TAG/NAME MATCH — fast, no AI ── */
         let service = directMatch(question, services);
         let intent = question;
         let menuIndex = -1;
@@ -229,57 +268,54 @@ router.post('/generate-ai-response', async (req, res) => {
 
         /* ── STEP 2: AI DEEP MATCH — only if direct match failed ── */
         if (!service) {
-            const analysis = await aiMatch(question, services, data.customPrompt, data.category);
+            const analysis = await aiMatch(question, services, data.category || []);
             intent = analysis.intent;
 
             if (!analysis.relevant) {
+                // Truly off-topic — generate a redirect
                 const msg = await gemini(`
 User asked: "${question}"
-Our services: ${data.category.join(", ")}
-Write 2 lines:
-Line 1: "We regret this is outside our area of expertise."
-Line 2: Ask one short question using: ${data.category.join(", ")}
+Our services: ${(data.category || []).join(', ')}
+Write 2 sentences:
+1. Kindly say this is outside our area.
+2. Ask one short question about what we offer: ${(data.category || []).join(', ')}
+Return only the text.
 `);
                 return res.json({
                     success: true,
                     intent: "out_of_scope",
-                    response: msg || `We regret this is outside our expertise. Are you looking for ${data.category.join(" or ")}?`,
+                    response: msg || `That's a bit outside our area of expertise. Are you looking for help with ${(data.category || []).join(' or ')}?`,
                     suggestions: data.customPrompt
                 });
             }
 
             if (analysis.serviceIndex >= 0 && analysis.serviceIndex < services.length) {
                 service = services[analysis.serviceIndex];
-                menuIndex = analysis.menuIndex >= 0 ? analysis.menuIndex : getBestMenu(service.name, data.customPrompt);
+                menuIndex = getBestMenu(service.name, data.customPrompt);
             }
         }
 
-        /* ── SERVICE FOUND ── */
+        /* ── SERVICE FOUND — generate contextual answer ── */
         if (service) {
-            const introText = await getIntro(question);
+            const answer = await generateContextualAnswer(question, service, data.category || []);
             const suggestions = getSuggestions(data.customPrompt, menuIndex);
 
             return res.json({
                 success: true,
                 intent,
-                response: `${introText}\n\n${service.name}\n${service.description}\n\nWould you like a free quote or more details?`,
+                response: answer || `${service.name}\n\n${service.description}\n\nWould you like more details?`,
                 suggestions
             });
         }
 
-        /* ── NO MATCH ── */
-        const msg = await gemini(`
-User asked: "${question}"
-Our services: ${data.category.join(", ")}
-Write 2 lines:
-Line 1: "We apologize, we could not find an exact match for your query."
-Line 2: Ask one short specific question using: ${data.category.join(", ")}
-`);
+        /* ── NO SERVICE MATCH but topic is relevant ──
+           Use full KB as context — never say "I don't know"  ── */
+        const fallback = await generateKnowledgeFallback(question, services, data.category || []);
 
         return res.json({
             success: true,
             intent,
-            response: msg || `We apologize, we could not find an exact match. Are you looking for ${data.category.join(" or ")}?`,
+            response: fallback || `I'm not sure I have the exact answer, but I'd love to help — could you tell me more about what you're looking for?`,
             suggestions: data.customPrompt
         });
 
