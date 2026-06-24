@@ -532,6 +532,7 @@ const updateWebsite = async (id, data) => {
     if (data.tags !== undefined) addUpdateField('tags', processTagsData(data.tags), 'tags');
     if (data.systemPrompt !== undefined) addUpdateField('systemPrompt', Array.isArray(data.systemPrompt) ? data.systemPrompt : [], 'sys');
     if (data.customPrompt !== undefined) addUpdateField('customPrompt', Array.isArray(data.customPrompt) ? data.customPrompt : [], 'custom');
+    if (data.customPromptLeads !== undefined) addUpdateField('customPromptLeads', Array.isArray(data.customPromptLeads) ? data.customPromptLeads : [], 'customLeads');
     if (data.category !== undefined) addUpdateField('category', Array.isArray(data.category) ? data.category : ['General'], 'cat');
     if (data.status !== undefined) addUpdateField('status', data.status || 'active', 'st');
     if (data.apiKey !== undefined) addUpdateField('apiKey', data.apiKey || existingItem.apiKey, 'api');
@@ -1287,6 +1288,7 @@ const updateWebsiteByUserId = async (id, data, userId) => {
     if (data.tags !== undefined) addUpdateField('tags', processTagsData(data.tags), 'tags');
     if (data.systemPrompt !== undefined) addUpdateField('systemPrompt', Array.isArray(data.systemPrompt) ? data.systemPrompt : [], 'sys');
     if (data.customPrompt !== undefined) addUpdateField('customPrompt', Array.isArray(data.customPrompt) ? data.customPrompt : [], 'custom');
+    if (data.customPromptLeads !== undefined) addUpdateField('customPromptLeads', Array.isArray(data.customPromptLeads) ? data.customPromptLeads : [], 'customLeads');
     if (data.category !== undefined) addUpdateField('category', Array.isArray(data.category) ? data.category : ['General'], 'cat');
     if (data.status !== undefined) addUpdateField('status', data.status || 'active', 'st');
     if (data.apiKey !== undefined) addUpdateField('apiKey', data.apiKey || existingItem.apiKey, 'api');
