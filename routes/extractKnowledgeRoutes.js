@@ -96,12 +96,13 @@ router.post('/extract-knowledge', async (req, res) => {
 - Each topic needs: name (short 2–5 words), description (80–200 chars about what it covers), tags (3–6 keywords)
 - Only include information actually present in the content
 
-━━━ Rules for ACTIONS (chatbot buttons) ━━━
-- Identify 3–7 action buttons relevant to this business
-- These are the BUTTONS shown in the chat widget that users can tap to start a conversation
-- Include at least 1–2 specifically for capturing leads (e.g. "Get a Free Quote", "Book a Consultation", "Request Demo")
-- For each action button, suggest 2–4 child options (sub-buttons or follow-up prompts the user taps next)
-- Children should be SHORT, conversational, tap-friendly (e.g. "Call me back", "Send me pricing", "Book online")
+━━━ Rules for ACTIONS (chatbot quick questions) ━━━
+- Identify 4–7 natural questions a visitor would type or tap in a chatbot for this business
+- Phrase each as what a real user would say — a question or short request, NOT a CTA label
+- Good examples: "What are your pricing plans?", "How do I book a free consultation?", "What services do you offer?", "Can I get a free quote?", "How can I contact you?"
+- Bad examples (do NOT use): "Get Free Enquiry", "Request Demo", "Contact Us" — these sound like buttons, not human questions
+- Include at least 1–2 that capture leads (e.g. "Can I get a free quote?", "How do I book a consultation?")
+- For each question, add 2–4 SHORT child options the user taps to narrow down their need — phrased as what the user would tap (e.g. "Send me pricing", "Book a demo call", "Call me back", "Email me details")
 - Infer the business type intelligently from the content
 
 ━━━ Output Format ━━━
@@ -121,7 +122,7 @@ Output ONLY valid JSON, no explanation, no markdown code fences:
   ],
   "actions": [
     {
-      "text": "Get a Free Quote",
+      "text": "Can I get a free quote?",
       "children": [
         { "text": "Send me pricing", "children": [] },
         { "text": "Schedule a call", "children": [] },
@@ -129,7 +130,7 @@ Output ONLY valid JSON, no explanation, no markdown code fences:
       ]
     },
     {
-      "text": "Contact Us",
+      "text": "How can I contact you?",
       "children": [
         { "text": "Call me back", "children": [] },
         { "text": "Send a message", "children": [] }
