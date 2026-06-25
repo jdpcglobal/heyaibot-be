@@ -1,0 +1,11 @@
+# Exclude from deployment — keeps the container image lean
+.git
+.github
+.gitignore
+.gitattributes
+amplify.yml
+vercel.json
+*.md
+*.log
+.env*
+.npmignore

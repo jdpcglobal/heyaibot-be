@@ -6,7 +6,6 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-require('dotenv').config();
 
 /* ─────────────────────────────
    GEMINI CALL (same pattern as aiRoutes.js)

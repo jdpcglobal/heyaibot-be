@@ -1,6 +1,6 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
-require('dotenv').config(); // make sure .env is loaded
+// dotenv is loaded once in server.js — do not call dotenv.config() here
 
 // Configure AWS DynamoDB client
 const client = new DynamoDBClient({

@@ -7,7 +7,7 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const path = require("path");
-require("dotenv").config();
+require("dotenv").config(); // Load env vars ONCE here — do not call dotenv.config() in any route or model file
 
 
 
@@ -136,12 +136,16 @@ app.use((err, req, res, next) => {
 // ---------------------------
 //  Start Server
 // ---------------------------
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || process.env.WEBSITES_PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`\n✅ Server running on port ${PORT}`);
+// Bind to 0.0.0.0 so Azure's health probe (and load balancer) can reach the container
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n✅ Server running on 0.0.0.0:${PORT}`);
   console.log(`✅ Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`✅ API available at http://localhost:${PORT}`);
-  console.log(`✅ Health check: http://localhost:${PORT}/health`);
-  console.log(`✅ API Docs: http://localhost:${PORT}/api/docs\n`);
+  console.log(`✅ API available at http://0.0.0.0:${PORT}`);
+  console.log(`✅ Health check: http://0.0.0.0:${PORT}/health`);
+  console.log(`✅ API Docs: http://0.0.0.0:${PORT}/api/docs\n`);
+}).on('error', (err) => {
+  console.error('❌ Failed to start server:', err.message);
+  process.exit(1);
 });

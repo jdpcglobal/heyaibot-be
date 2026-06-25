@@ -2,9 +2,13 @@
   "name": "keyword-backend",
   "version": "1.0.0",
   "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -12,30 +16,16 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.902.0",
     "@aws-sdk/lib-dynamodb": "^3.902.0",
-    "aws-amplify": "^6.15.7",
-    "aws-sdk": "^2.1692.0",
     "axios": "^1.13.2",
-    "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
-    "jsonwebtoken": "^9.0.3",
-    "mongoose": "^8.16.1",
-    "multer": "^2.0.2",
-    "next-auth": "^4.24.13",
     "node-fetch": "^2.7.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@aws-amplify/backend": "^1.17.0",
-    "@aws-amplify/backend-cli": "^1.8.0",
-    "aws-cdk-lib": "^2.216.0",
-    "constructs": "^10.4.2",
-    "esbuild": "^0.25.11",
-    "nodemon": "^3.1.10",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "nodemon": "^3.1.10"
   },
   "repository": {
     "type": "git",
