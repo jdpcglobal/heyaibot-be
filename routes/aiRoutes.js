@@ -100,36 +100,16 @@ const aiMatch = async (question, services, categories) => {
     if (!services.length) return { relevant: true, serviceIndex: -1, intent: question };
 
     const serviceList = services.map((s, i) =>
-`[${i}] Name: ${s.name}
-Category: ${s.category}
-Tags: ${s.tags.join(', ')}
-Description: ${s.description}`
-    ).join('\n\n');
+`[${i}] ${s.name} | ${s.tags.join(', ')}`
+    ).join('\n');
 
-    const res = await gemini(`
-You are matching a user's question to the most relevant service from a knowledge base.
-
-Business domain: ${categories.join(', ')}
-
-User question: "${question}"
-
-Available services:
+    const res = await gemini(`Match this question to a service. Business: ${categories.join(', ')}
+Question: "${question}"
+Services:
 ${serviceList}
-
-Instructions:
-- Think about what the user TRULY wants, beyond literal word matching
-- Consider synonyms, related concepts, and intent
-- A question is "relevant" if it relates to this business in ANY way
-- Only mark "relevant: false" if the question is completely unrelated to this business (e.g. asking about cooking recipes when the business is IT consulting)
-- If multiple services partially match, pick the BEST one — do not return -1 just because it's not a perfect match
-- When uncertain, pick the closest service rather than returning no match
-
-Return ONLY valid JSON (no markdown):
-{"relevant": true, "serviceIndex": 0, "intent": "what the user wants"}
-
-No match found: {"relevant": true, "serviceIndex": -1, "intent": "what the user wants"}
-Truly off-topic: {"relevant": false, "serviceIndex": -1, "intent": "out of scope"}
-`);
+Return ONLY JSON: {"relevant":true,"serviceIndex":0,"intent":"brief intent"}
+Off-topic: {"relevant":false,"serviceIndex":-1,"intent":"out of scope"}
+No match: {"relevant":true,"serviceIndex":-1,"intent":"brief intent"}`);
 
     try {
         const clean = res?.replace(/```json|```/g, '').trim();
@@ -151,22 +131,13 @@ Truly off-topic: {"relevant": false, "serviceIndex": -1, "intent": "out of scope
 ──────────────────────────── */
 const generateContextualAnswer = async (question, service, businessCategories) => {
     return await gemini(`
-You are a helpful assistant for a business in: ${businessCategories.join(', ')}
+You are a concise assistant for a business in: ${businessCategories.join(', ')}
 
 User asked: "${question}"
 
-Most relevant topic from our knowledge base:
-Name: ${service.name}
-Category: ${service.category}
-Description: ${service.description}
-Tags: ${service.tags.join(', ')}
+Topic: ${service.name} — ${service.description}
 
-Write a helpful, conversational reply (2–3 sentences) that:
-- Directly answers what the user asked using information from the topic
-- Sounds natural — not like reading from a database
-- Ends with one short follow-up offer (e.g. "Would you like more details?" or "Want a free quote?")
-
-Return only the reply text, no labels or formatting.
+Reply in 1–2 short sentences. Answer directly, sound natural, end with one brief offer (e.g. "Want more details?"). No lists, no bullet points, no formatting.
 `);
 };
 
@@ -181,21 +152,14 @@ const generateKnowledgeFallback = async (question, services, categories) => {
         .join('\n');
 
     return await gemini(`
-You are a helpful assistant for a business in: ${categories.join(', ')}
+You are a concise assistant for a business in: ${categories.join(', ')}
 
 User asked: "${question}"
 
-Our full knowledge base:
+Knowledge base:
 ${kb}
 
-The user's question didn't match a specific topic exactly. Write a helpful reply that:
-- Uses whatever is most relevant from the knowledge base to partially answer
-- If a related topic exists, mention it by name
-- If nothing is directly relevant, acknowledge kindly and mention 1–2 topics you CAN help with
-- Never say "I don't know" or "outside our scope" — always offer something useful
-- Max 3 sentences, conversational tone
-
-Return only the reply text.
+Reply in 1–2 short sentences using the most relevant topic. Mention one topic by name if helpful. No lists, no formatting.
 `);
 };
 
@@ -275,10 +239,7 @@ router.post('/generate-ai-response', async (req, res) => {
                 const msg = await gemini(`
 User asked: "${question}"
 Our services: ${(data.category || []).join(', ')}
-Write 2 sentences:
-1. Kindly say this is outside our area.
-2. Ask one short question about what we offer: ${(data.category || []).join(', ')}
-Return only the text.
+In one sentence: politely say this is outside our area and mention what we can help with.
 `);
                 return res.json({
                     success: true,
